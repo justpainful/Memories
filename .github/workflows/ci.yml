@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: macos-latest
+    env:
+      EXPECTED_BUNDLE_ID: ${{ vars.EXPECTED_BUNDLE_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail on protected identity file changes in pull requests
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_ref="${{ github.event.pull_request.base.sha }}"
+          head_ref="${{ github.event.pull_request.head.sha }}"
+          changed="$(git diff --name-only "${base_ref}" "${head_ref}")"
+          protected='^(AGENTS\.md|project\.yml|Config/AppIdentity\.xcconfig|Scripts/verify_bundle_identity\.sh|\.github/CODEOWNERS|\.github/workflows/)'
+          if echo "${changed}" | grep -E "${protected}" >/dev/null; then
+            echo "Protected identity/build files changed in this pull request." >&2
+            echo "${changed}" | grep -E "${protected}" >&2
+            exit 1
+          fi
+
+      - name: Prepare scripts
+        run: chmod +x Scripts/*.sh
+
+      - name: Bootstrap toolchain
+        run: Scripts/bootstrap.sh
+
+      - name: Validate iOS 26 SDK availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/logs
+          xcodebuild -showsdks | tee build/logs/xcodebuild-showsdks.log
+          if ! grep -E 'iphone(os|simulator)26\.' build/logs/xcodebuild-showsdks.log >/dev/null; then
+            echo "CI requires an installed iOS 26 SDK on the macOS runner." >&2
+            exit 1
+          fi
+
+      - name: Generate project
+        run: Scripts/generate_project.sh
+
+      - name: Verify bundle identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EXPECTED_BUNDLE_ID="${EXPECTED_BUNDLE_ID:-space.hi.memories}"
+          Scripts/verify_bundle_identity.sh
+
+      - name: Resolve iOS 26 simulator destination
+        id: simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination="$(python3 - <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          payload = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+          for runtime, devices in payload.get("devices", {}).items():
+              if "iOS 26" not in runtime:
+                  continue
+              for device in devices:
+                  if device.get("isAvailable") and "iPhone" in device.get("name", ""):
+                      print(f"platform=iOS Simulator,id={device['udid']}")
+                      sys.exit(0)
+          sys.exit(1)
+          PY
+          )"
+          if [[ -z "${destination}" ]]; then
+            echo "Unable to find an available iPhone simulator running iOS 26." >&2
+            exit 1
+          fi
+          echo "destination=${destination}" >> "$GITHUB_OUTPUT"
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/logs build/results
+          xcodebuild \
+            test \
+            -project Memories.xcodeproj \
+            -scheme Memories \
+            -destination "${{ steps.simulator.outputs.destination }}" \
+            -only-testing:MemoriesUnitTests \
+            -resultBundlePath build/results/MemoriesUnitTests.xcresult \
+            | tee build/logs/unit-tests.log
+
+      - name: Run UI smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            test \
+            -project Memories.xcodeproj \
+            -scheme Memories \
+            -destination "${{ steps.simulator.outputs.destination }}" \
+            -only-testing:MemoriesUITests \
+            -resultBundlePath build/results/MemoriesUITests.xcresult \
+            | tee build/logs/ui-smoke-tests.log
+
+      - name: Build generic iPhone device app
+        shell: bash
+        run: |
+          set -euo pipefail
+          Scripts/build_unsigned_ipa.sh
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-logs
+          path: |
+            build/logs
+            build/results
+            artifacts/*.manifest.json
+            artifacts/*.sha256

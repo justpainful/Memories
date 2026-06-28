@@ -1,0 +1,65 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_unsigned_ipa:
+    runs-on: macos-latest
+    env:
+      EXPECTED_BUNDLE_ID: ${{ vars.EXPECTED_BUNDLE_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare scripts
+        run: chmod +x Scripts/*.sh
+
+      - name: Bootstrap toolchain
+        run: Scripts/bootstrap.sh
+
+      - name: Validate iOS 26 SDK availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/logs
+          xcodebuild -showsdks | tee build/logs/xcodebuild-showsdks.log
+          if ! grep -E 'iphone(os|simulator)26\.' build/logs/xcodebuild-showsdks.log >/dev/null; then
+            echo "Unsigned IPA packaging requires an installed iOS 26 SDK on the macOS runner." >&2
+            exit 1
+          fi
+
+      - name: Generate project
+        run: Scripts/generate_project.sh
+
+      - name: Verify bundle identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EXPECTED_BUNDLE_ID="${EXPECTED_BUNDLE_ID:-space.hi.memories}"
+          Scripts/verify_bundle_identity.sh
+
+      - name: Build and verify unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EXPECTED_BUNDLE_ID="${EXPECTED_BUNDLE_ID:-space.hi.memories}"
+          Scripts/build_unsigned_ipa.sh
+
+      - name: Upload unsigned IPA artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa
+          path: |
+            artifacts/*.ipa
+            artifacts/*.sha256
+            artifacts/*.manifest.json
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa-failure-logs
+          path: |
+            build/logs
+            build/results

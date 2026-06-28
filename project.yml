@@ -1,0 +1,77 @@
+name: Memories
+options:
+  bundleIdPrefix: space.hi
+  deploymentTarget:
+    iOS: "26.0"
+  xcodeVersion: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""
+    TARGETED_DEVICE_FAMILY: "1"
+    SUPPORTS_MACCATALYST: NO
+    INFOPLIST_FILE: Sources/App/Info.plist
+    PRODUCT_NAME: $(PRODUCT_NAME)
+    PRODUCT_BUNDLE_IDENTIFIER: $(PRODUCT_BUNDLE_IDENTIFIER)
+    MARKETING_VERSION: $(MARKETING_VERSION)
+    CURRENT_PROJECT_VERSION: $(CURRENT_PROJECT_VERSION)
+    SWIFT_VERSION: 6.0
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    GENERATE_INFOPLIST_FILE: NO
+configs:
+  Debug: debug
+  Release: release
+configFiles:
+  Debug: Config/Build.xcconfig
+  Release: Config/Build.xcconfig
+packages: {}
+targets:
+  Memories:
+    type: application
+    platform: iOS
+    supportedDestinations:
+      - iPhone
+    configFiles:
+      Debug: Config/Build.xcconfig
+      Release: Config/Build.xcconfig
+    sources:
+      - path: Sources
+      - path: Tests/UI/Support
+        optional: true
+    settings:
+      PRODUCT_MODULE_NAME: Memories
+    scheme:
+      testTargets:
+        - MemoriesUnitTests
+        - MemoriesUITests
+      gatherCoverageData: true
+    dependencies: []
+  MemoriesUnitTests:
+    type: bundle.unit-test
+    platform: iOS
+    supportedDestinations:
+      - iPhone
+    sources:
+      - path: Tests/Unit
+        optional: true
+    dependencies:
+      - target: Memories
+    settings:
+      TEST_HOST: ""
+      BUNDLE_LOADER: ""
+  MemoriesUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    supportedDestinations:
+      - iPhone
+    sources:
+      - path: Tests/UI
+        optional: true
+    dependencies:
+      - target: Memories
+    settings:
+      TEST_TARGET_NAME: Memories
