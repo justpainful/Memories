@@ -29,6 +29,7 @@ actor MemoryEngine {
         candidates += season(reference, options)
         candidates += forgotten(reference, options)
         candidates += rediscovery(reference, options)
+        candidates += rarelySeen(reference, options)
         candidates += places(reference, options)
         candidates += smartRandom(reference, options)
 
@@ -364,6 +365,51 @@ actor MemoryEngine {
             referenceDate: assets.first?.creationDate ?? reference,
             assetIdentifiers: assets.map(\.localIdentifier),
             coverIdentifier: Curator.cover(for: Array(assets))?.localIdentifier,
+            components: components
+        )]
+    }
+
+    /// Strong frames that have simply never had their turn.
+    ///
+    /// Not the same as `forgotten`, which is about age — these can be from last month. They
+    /// are here because scoring alone tends to keep electing the same winners, and a library
+    /// has more good photographs in it than the feed ever gets around to.
+    private func rarelySeen(_ reference: Date, _ options: CurationOptions) -> [MemoryCandidate] {
+        var descriptor = FetchDescriptor<AssetRecord>(
+            predicate: #Predicate { $0.memoryScore > 0.6 && $0.shownCount == 0 },
+            sortBy: [SortDescriptor(\.memoryScore, order: .reverse)]
+        )
+        descriptor.fetchLimit = 200
+        guard let pool = try? modelContext.fetch(descriptor) else { return [] }
+
+        // Leave the last two months alone: something shot recently has not been passed over,
+        // it just has not come up yet.
+        guard let settled = Calendar.current.date(byAdding: .month, value: -2, to: reference)
+        else { return [] }
+
+        let eligible = pool.filter {
+            LibraryQuery.passes($0, options: options)
+                && $0.isBestInSimilarityCluster
+                && $0.creationDate < settled
+        }
+        let assets = Array(eligible.prefix(10))
+        guard assets.count >= 5 else { return [] }
+
+        var components = ScoreComponents()
+        components.relevance = 0.40
+        components.quality = averageQuality(assets)
+        components.novelty = 1.0
+        components.timeSignificance = 0.35
+        components.mediaDiversity = diversity(assets)
+
+        return [MemoryCandidate(
+            id: "rarelySeen-\(Calendar.current.component(.weekOfYear, from: reference))",
+            kind: .rarelySeen,
+            title: "Good photos you rarely see",
+            subtitle: "\(assets.count) moments",
+            referenceDate: assets.first?.creationDate ?? reference,
+            assetIdentifiers: assets.map(\.localIdentifier),
+            coverIdentifier: Curator.cover(for: assets)?.localIdentifier,
             components: components
         )]
     }

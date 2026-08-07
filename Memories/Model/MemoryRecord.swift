@@ -14,6 +14,9 @@ enum MemoryKind: String, Codable, CaseIterable, Sendable {
     case season
     case random
     case rediscovery
+    /// Strong photographs the engine keeps passing over. Distinct from `forgotten`, which is
+    /// about age: these can be recent and still never have had their turn.
+    case rarelySeen
 
     /// The editorial voice differs per kind; this is the fallback when nothing better fits.
     var fallbackTitle: String {
@@ -29,6 +32,7 @@ enum MemoryKind: String, Codable, CaseIterable, Sendable {
         case .season:        return "This season, before"
         case .random:        return "Something from your library"
         case .rediscovery:   return "Recently rediscovered"
+        case .rarelySeen:    return "Rarely seen"
         }
     }
 }

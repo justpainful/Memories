@@ -71,13 +71,19 @@ enum TimeWindow: Hashable, Identifiable, Sendable {
     /// The Explore Time panel, in the order the user reads it — now, then the same span in
     /// earlier years widening from a day to a season, then round anniversaries, then the one
     /// door out of the grid.
-    static let exploreGroups: [[TimeWindow]] = [
-        [.today, .thisWeek, .thisMonth, .thisYear],
-        [.onThisDay, .sameWeekendInPreviousYears, .thisWeekLastYear,
-         .thisWeekInPreviousYears, .thisMonthInPreviousYears, .thisSeasonInPreviousYears],
-        [.yearsAgo(1), .yearsAgo(2), .yearsAgo(3), .yearsAgo(5), .yearsAgo(10)],
-        [.surpriseMe],
-    ]
+    /// Computed rather than stored so the cross-year row names the month you are actually in:
+    /// "Every August" in August. One row makes the idea reachable without the twelve that
+    /// `everyMonthWindows` would put in front of the four groups.
+    static var exploreGroups: [[TimeWindow]] {
+        [
+            [.today, .thisWeek, .thisMonth, .thisYear],
+            [.onThisDay, .sameWeekendInPreviousYears, .thisWeekLastYear,
+             .thisWeekInPreviousYears, .thisMonthInPreviousYears, .thisSeasonInPreviousYears,
+             .everyMonth(Calendar.current.component(.month, from: .now))],
+            [.yearsAgo(1), .yearsAgo(2), .yearsAgo(3), .yearsAgo(5), .yearsAgo(10)],
+            [.surpriseMe],
+        ]
+    }
 
     /// The compact filter row above the feed. The recent spans come in pairs — this one and
     /// the one before it — because that is how people ask for them.

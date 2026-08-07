@@ -190,34 +190,37 @@ private struct YearScrubber: View {
     }
 }
 
-/// Every frame from one month.
+/// Every frame from one month, a day at a time.
 struct MonthGridView: View {
     let bucket: MonthBucket
 
     @Environment(\.app) private var app
-    @State private var records: [AssetRecord] = []
+    @State private var days: [DaySlice] = []
     @State private var viewing: String?
 
     private let columns = [GridItem(.adaptive(minimum: 108), spacing: 4)]
 
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: 4) {
-                ForEach(records, id: \.localIdentifier) { record in
-                    Button { viewing = record.localIdentifier } label: {
-                        PhotoImageView(identifier: record.localIdentifier, targetSide: 240)
-                            .aspectRatio(1, contentMode: .fill)
-                            .clipShape(.rect(cornerRadius: 6))
-                            .overlay(alignment: .bottomLeading) {
-                                if record.isVideo || record.isLivePhoto {
-                                    MediaBadge(record: record).padding(5)
+            // One grid per day rather than one grid for the month: a day that is scrolled
+            // past stays a few hundred bytes of dates and identifiers instead of tiles.
+            LazyVStack(alignment: .leading, spacing: Space.l) {
+                ForEach(days) { day in
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        dayHeader(day)
+                        LazyVGrid(columns: columns, spacing: 4) {
+                            ForEach(day.records, id: \.localIdentifier) { record in
+                                Button { viewing = record.localIdentifier } label: {
+                                    tile(record)
                                 }
+                                .buttonStyle(.plain)
                             }
+                        }
+                        .padding(.horizontal, 4)
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            .padding(4)
+            .padding(.top, Space.s)
             .padding(.bottom, 132)
         }
         .scrollIndicators(.hidden)
@@ -228,15 +231,69 @@ struct MonthGridView: View {
             get: { viewing.map(ViewerRequest.init(identifier:)) },
             set: { viewing = $0?.identifier }
         )) { request in
-            PhotoViewerView(identifiers: records.map(\.localIdentifier), startAt: request.identifier)
+            PhotoViewerView(identifiers: monthIdentifiers, startAt: request.identifier)
         }
         .task { load() }
+    }
+
+    /// Opening one frame hands the viewer the whole month, not the day it was tapped in,
+    /// so a swipe carries on past midnight the way scrolling does.
+    private var monthIdentifiers: [String] {
+        days.flatMap { $0.records.map(\.localIdentifier) }
+    }
+
+    private func dayHeader(_ day: DaySlice) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+            Text(day.date, format: .dateTime.weekday(.wide).month(.wide).day())
+                .font(Typo.sectionTitle)
+                .foregroundStyle(Palette.textPrimary)
+            Text("\(day.records.count)")
+                .font(Typo.meta)
+                .foregroundStyle(Palette.textTertiary)
+            Spacer()
+        }
+        .padding(.horizontal, Space.gutter)
+    }
+
+    private func tile(_ record: AssetRecord) -> some View {
+        PhotoImageView(identifier: record.localIdentifier, targetSide: 240)
+            .aspectRatio(1, contentMode: .fill)
+            .clipShape(.rect(cornerRadius: 6))
+            .overlay(alignment: .bottomLeading) {
+                if record.isVideo || record.isLivePhoto {
+                    MediaBadge(record: record).padding(5)
+                }
+            }
     }
 
     private func load() {
         let calendar = Calendar.current
         guard let interval = calendar.interval(year: bucket.year, month: bucket.month) else { return }
-        records = LibraryQuery.assets(in: [interval], options: .browsing,
-                                      context: app.container.mainContext).reversed()
+        let records: [AssetRecord] = LibraryQuery.assets(in: [interval], options: .browsing,
+                                                         context: app.container.mainContext).reversed()
+        days = DaySlice.split(records, calendar: calendar)
+    }
+}
+
+/// One day of a month, with the frames taken that day.
+private struct DaySlice: Identifiable {
+    var date: Date
+    var records: [AssetRecord]
+
+    var id: Date { date }
+
+    /// The month arrives newest first, so each day is already one unbroken run — walking it
+    /// once keeps the newest day on top without sorting a hundred thousand rows again.
+    static func split(_ records: [AssetRecord], calendar: Calendar) -> [DaySlice] {
+        var slices: [DaySlice] = []
+        for record in records {
+            let day = calendar.startOfDay(for: record.creationDate)
+            if slices.last?.date == day {
+                slices[slices.count - 1].records.append(record)
+            } else {
+                slices.append(DaySlice(date: day, records: [record]))
+            }
+        }
+        return slices
     }
 }
