@@ -45,18 +45,27 @@ struct FeatureVector: Sendable, Equatable {
 }
 
 extension FeaturePrintObservation {
-    /// Unpack the observation's raw buffer according to the element type it reports.
+    /// Unpack the observation's raw buffer.
+    ///
+    /// The element width is derived from the buffer rather than matched against enum cases,
+    /// so this keeps working if Vision changes what it hands back.
     var featureVector: FeatureVector {
         let raw = data
-        switch elementType {
-        case .float:
-            guard raw.count % MemoryLayout<Float>.size == 0 else { return FeatureVector(values: []) }
-            return FeatureVector(values: raw.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) })
+        guard elementCount > 0, raw.count % elementCount == 0 else {
+            return FeatureVector(values: [])
+        }
 
-        case .float16:
-            guard raw.count % MemoryLayout<Float16>.size == 0 else { return FeatureVector(values: []) }
+        switch raw.count / elementCount {
+        case MemoryLayout<Float16>.size:
             let halves: [Float16] = raw.withUnsafeBytes { Array($0.bindMemory(to: Float16.self)) }
             return FeatureVector(values: halves.map(Float.init))
+
+        case MemoryLayout<Float>.size:
+            return FeatureVector(values: raw.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) })
+
+        case MemoryLayout<Double>.size:
+            let doubles: [Double] = raw.withUnsafeBytes { Array($0.bindMemory(to: Double.self)) }
+            return FeatureVector(values: doubles.map(Float.init))
 
         default:
             return FeatureVector(values: [])

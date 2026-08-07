@@ -41,8 +41,9 @@ enum VisionAnalyzer {
         // portraits is the one where their eyes are open and it isn't blurred".
         if let faces = try? await DetectFaceCaptureQualityRequest().perform(on: cgImage) {
             result.faceCount = faces.count
-            let qualities = faces.compactMap(\.captureQuality).map(Double.init)
-            result.bestFaceQuality = qualities.max()
+            result.bestFaceQuality = faces.compactMap { $0.captureQuality?.score }
+                .map(Double.init)
+                .max()
         }
 
         result.sharpness = sharpness(of: cgImage)
