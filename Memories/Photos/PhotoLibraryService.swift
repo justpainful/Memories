@@ -38,6 +38,27 @@ struct AssetSnapshot: Sendable, Hashable {
     }
 }
 
+/// What Photos says actually changed, rather than merely that something did.
+///
+/// `PHChange` will name the assets involved, which is the difference between ingesting the one
+/// photo the user just took and re-reading fifteen thousand rows to find it.
+struct LibraryDelta: Sendable {
+    var inserted: [AssetSnapshot] = []
+    var updated: [AssetSnapshot] = []
+    var removedIdentifiers: [String] = []
+
+    /// How many assets the library holds now, carried along so nobody has to count again.
+    var libraryCount: Int = 0
+
+    /// False when Photos could not describe the change asset by asset — a Limited Access
+    /// selection being edited, most often. Only a full pass can tell what happened then.
+    var isIncremental: Bool = true
+
+    var isEmpty: Bool {
+        inserted.isEmpty && updated.isEmpty && removedIdentifiers.isEmpty
+    }
+}
+
 /// How much of the library the app can see.
 enum PhotoAccess: Equatable, Sendable {
     case notDetermined
@@ -72,8 +93,22 @@ final class PhotoLibraryService {
     private(set) var changeGeneration: Int = 0
 
     private var observer: LibraryChangeObserver?
+    private let deltas: AsyncStream<LibraryDelta>
+    private let deltaContinuation: AsyncStream<LibraryDelta>.Continuation
+
+    /// What changed, for the one consumer that acts on it rather than merely redrawing:
+    /// the indexing coordinator.
+    ///
+    /// Buffered rather than dropped, because a photo taken while a pass is busy still has to
+    /// be indexed — just not this instant.
+    var changes: AsyncStream<LibraryDelta> { deltas }
 
     init() {
+        let (stream, continuation) = AsyncStream<LibraryDelta>.makeStream(
+            bufferingPolicy: .bufferingNewest(64)
+        )
+        deltas = stream
+        deltaContinuation = continuation
         access = Self.map(PHPhotoLibrary.authorizationStatus(for: .readWrite))
     }
 
@@ -113,15 +148,22 @@ final class PhotoLibraryService {
 
     func startObserving() {
         guard observer == nil else { return }
-        let observer = LibraryChangeObserver { [weak self] in
-            Task { @MainActor in
-                self?.changeGeneration &+= 1
-                self?.assetCount = Self.currentAssetCount()
-            }
+        let result = PHAsset.fetchAssets(with: Self.makeFetchOptions())
+        assetCount = result.count
+
+        let observer = LibraryChangeObserver(tracking: result) { [weak self] delta in
+            Task { @MainActor in self?.publish(delta) }
         }
         PHPhotoLibrary.shared().register(observer)
         self.observer = observer
-        assetCount = Self.currentAssetCount()
+    }
+
+    /// Views that only care that *something* moved keep working off the generation counter;
+    /// the indexer takes the delta itself.
+    private func publish(_ delta: LibraryDelta) {
+        assetCount = delta.libraryCount
+        changeGeneration &+= 1
+        deltaContinuation.yield(delta)
     }
 
     // MARK: Fetching
@@ -175,14 +217,36 @@ final class PhotoLibraryService {
 
 /// `PHPhotoLibraryChangeObserver` requires an `NSObject`; keeping it in its own tiny class
 /// lets the service stay a clean `@Observable`.
+///
+/// It holds on to the fetch the change is measured against, because a `PHChange` will only
+/// itemise a change relative to a result you already had.
 private final class LibraryChangeObserver: NSObject, PHPhotoLibraryChangeObserver {
-    private let onChange: () -> Void
+    private let onChange: @Sendable (LibraryDelta) -> Void
+    /// Photos delivers one notification at a time, and this is only ever read and replaced
+    /// inside that callback.
+    private var tracked: PHFetchResult<PHAsset>
 
-    init(onChange: @escaping () -> Void) {
+    init(tracking result: PHFetchResult<PHAsset>,
+         onChange: @escaping @Sendable (LibraryDelta) -> Void) {
+        tracked = result
         self.onChange = onChange
     }
 
     func photoLibraryDidChange(_ changeInstance: PHChange) {
-        onChange()
+        // No details means the assets we track are untouched — an album was renamed, or
+        // something else the app does not look at.
+        guard let details = changeInstance.changeDetails(for: tracked) else { return }
+        tracked = details.fetchResultAfterChanges
+
+        var delta = LibraryDelta()
+        delta.libraryCount = tracked.count
+        delta.isIncremental = details.hasIncrementalChanges
+
+        if details.hasIncrementalChanges {
+            delta.inserted = details.insertedObjects.map(AssetSnapshot.init)
+            delta.updated = details.changedObjects.map(AssetSnapshot.init)
+            delta.removedIdentifiers = details.removedObjects.map(\.localIdentifier)
+        }
+        onChange(delta)
     }
 }

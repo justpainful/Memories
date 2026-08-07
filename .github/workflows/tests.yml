@@ -1,0 +1,62 @@
+name: Tests
+
+# The logic that decides what a memory is — clustering, scoring, time windows, origin
+# detection — is pure functions. Proving them here takes seconds; proving them through the
+# simulator lane takes about twelve minutes, and every bug found in this project so far was
+# the kind a unit test catches instantly.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: macos-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          set -euo pipefail
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n1)
+          [ -n "$latest" ] && sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+
+      - name: Pick a simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          udid=$(xcrun simctl list devices available --json | python3 Scripts/pick_simulator.py)
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Memories.xcodeproj \
+            -scheme Memories \
+            -configuration Debug \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -only-testing:MemoriesTests \
+            -derivedDataPath .build \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test.log | tail -n 40
+
+      - name: Report failures
+        if: failure()
+        run: |
+          {
+            echo "## Failing tests"
+            echo '```'
+            grep -E "(error:|XCTAssert|#expect|failed)" test.log | sort -u | head -n 60
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

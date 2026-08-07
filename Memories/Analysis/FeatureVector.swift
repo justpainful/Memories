@@ -18,13 +18,22 @@ struct FeatureVector: Sendable, Equatable {
 
     // MARK: Persistence
 
+    /// Stored at half precision.
+    ///
+    /// A print is around 768 dimensions. At full precision that is 3 KB per asset, which on a
+    /// library of tens of thousands of photos is the single largest thing this app writes to
+    /// disk — and it is spent on a number that only ever feeds a cosine comparison. Half
+    /// precision halves it and changes similarity in about the fourth decimal place, far below
+    /// the 0.92 threshold anything is judged against.
     init?(data: Data) {
-        guard !data.isEmpty, data.count % MemoryLayout<Float>.size == 0 else { return nil }
-        values = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        guard !data.isEmpty, data.count % MemoryLayout<Float16>.size == 0 else { return nil }
+        let halves: [Float16] = data.withUnsafeBytes { Array($0.bindMemory(to: Float16.self)) }
+        values = halves.map(Float.init)
     }
 
     var data: Data {
-        values.withUnsafeBufferPointer { Data(buffer: $0) }
+        let halves = values.map(Float16.init)
+        return halves.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 
     // MARK: Comparison

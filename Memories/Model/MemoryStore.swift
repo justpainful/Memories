@@ -15,6 +15,8 @@ enum MemoryStore {
         CollectionRecord.self,
         AnalysisState.self,
         UserPreference.self,
+        FaceRecord.self,
+        PersonRecord.self,
     ])
 
     static func makeContainer(inMemory: Bool = false) -> ModelContainer {

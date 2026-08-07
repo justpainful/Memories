@@ -35,6 +35,20 @@ final class AssetRecord {
     /// assets are still catalogued from metadata but are skipped by the pixel stages.
     var isLocallyAvailable: Bool = true
 
+    // MARK: Where it came from
+
+    var originalFilename: String?
+    /// `SourcePlatform.rawValue`. Inferred, never certain — see `ProvenanceReader`.
+    var sourceRaw: String?
+
+    /// When the footage was actually recorded, recovered from the video container or from a
+    /// messaging app's filename, and only set when it disagrees with what Photos holds.
+    ///
+    /// Photos records when something entered *your library*. For anything saved from another
+    /// app that is the day you saved it, so a clip from a holiday three years ago would
+    /// otherwise surface as if it happened last week.
+    var capturedDate: Date?
+
     // MARK: Computed by the analysis pipeline
 
     /// Bumped when the pipeline's meaning changes, so old rows can be re-analyzed selectively.
@@ -109,5 +123,18 @@ extension AssetRecord {
     /// Everything the curator is allowed to consider for an emotional memory.
     var isMemoryEligible: Bool {
         !excludedFromMemories && isLocallyAvailable && isBestInSimilarityCluster
+    }
+
+    var source: SourcePlatform? { sourceRaw.flatMap(SourcePlatform.init(rawValue:)) }
+
+    /// The date this actually happened, preferring a recovered capture date over the day the
+    /// file arrived. Everything that arranges the library by time should read this.
+    var momentDate: Date { capturedDate ?? creationDate }
+
+    /// True when the two disagree by more than a day — worth telling the user about, because
+    /// it explains why something old is being shown as if it were recent.
+    var hasCorrectedDate: Bool {
+        guard let capturedDate else { return false }
+        return abs(capturedDate.timeIntervalSince(creationDate)) > 86_400
     }
 }

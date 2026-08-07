@@ -35,6 +35,9 @@ struct LibraryView: View {
                     NavigationLink { BestOfView() } label: {
                         LibraryRow(symbol: "trophy", title: "Best Of", count: nil)
                     }
+                    NavigationLink { PeopleView() } label: {
+                        LibraryRow(symbol: "person.2", title: "People", count: nil)
+                    }
                     NavigationLink { CalendarView() } label: {
                         LibraryRow(symbol: "calendar", title: "Calendar", count: nil)
                     }

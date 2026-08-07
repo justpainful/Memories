@@ -8,6 +8,10 @@ import SwiftUI
 /// Controls are one floating glass cluster that gets out of the way after a moment and comes
 /// back on a tap. Nothing is layered over the image permanently, and there is no story
 /// progress bar counting down at the user.
+///
+/// What is known *about* the photograph stays out of sight until it is asked for: swipe up
+/// on the picture, or ••• → Details. It arrives as a sheet with detents, so a short pull
+/// shows what matters and dragging it taller shows the rest.
 struct PhotoViewerView: View {
     let identifiers: [String]
     let startAt: String
@@ -48,6 +52,7 @@ struct PhotoViewerView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
             .onTapGesture { toggleControls() }
+            .simultaneousGesture(revealDetails)
 
             if showControls {
                 VStack {
@@ -79,6 +84,7 @@ struct PhotoViewerView: View {
         .sheet(isPresented: $showDetails) {
             AssetDetailsView(identifier: current)
                 .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(
             get: { similarFor.map(ViewerRequest.init(identifier:)) },
@@ -112,13 +118,34 @@ struct PhotoViewerView: View {
         }
     }
 
+    // MARK: Revealing the details
+
+    /// Swipe up on the photograph to pull the details panel in, the way Photos does it.
+    ///
+    /// Two other gestures already want this touch: the pager's horizontal scroll and the tap
+    /// that toggles the controls. So this runs *simultaneously* rather than competing — it
+    /// never claims the touch while the finger is down, and it decides only once the finger
+    /// lifts, and only for a swipe that is clearly upward rather than sideways. A horizontal
+    /// flick still turns the page, and a tap never travels far enough to reach here.
+    private var revealDetails: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { value in
+                let rise = -value.translation.height
+                guard rise > 60, abs(value.translation.width) < rise * 0.6 else { return }
+                Haptics.impact(.soft)
+                showDetails = true
+            }
+    }
+
     // MARK: Controls
 
     private var topBar: some View {
         HStack {
             GlassIconButton(systemImage: "chevron.left", label: "Back", tone: .clear) { dismiss() }
             Spacer()
-            if let record { Text(record.creationDate, format: .dateTime.month(.abbreviated).day().year())
+            // The moment it happened, not the day the file arrived — otherwise a clip saved
+            // from a message would be labelled with the day it was saved.
+            if let record { Text(record.momentDate, format: .dateTime.month(.abbreviated).day().year())
                 .font(Typo.meta)
                 .foregroundStyle(.white.opacity(0.9))
                 .padding(.horizontal, Space.m)
@@ -236,7 +263,7 @@ struct PhotoViewerView: View {
 
     private func showThisDay() {
         guard let record else { return }
-        let components = Calendar.current.dateComponents([.month, .day], from: record.creationDate)
+        let components = Calendar.current.dateComponents([.month, .day], from: record.momentDate)
         guard let month = components.month, let day = components.day else { return }
         dayWindow = .dayAcrossYears(month: month, day: day)
     }
