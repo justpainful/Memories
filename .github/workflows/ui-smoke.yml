@@ -1,9 +1,13 @@
 name: UI Smoke
 
 # Compile-only CI cannot catch the failure mode that actually hurts here: a screen that
-# renders letterboxed, cropped, or blank. This lane boots a real simulator, seeds it with a
-# synthetic photo library, launches the app, and captures screenshots as artifacts so the
-# UI can be looked at rather than assumed.
+# renders letterboxed, cropped, clipped or blank. This lane boots a real simulator, seeds it
+# with a synthetic photo library, then drives the app through every surface with XCUITest and
+# uploads a screenshot of each one.
+#
+# The UI test is also what answers the photo-library permission alert: `simctl privacy grant
+# photos` does not actually grant access on current runtimes, so without automation the app
+# sits behind a system dialog and every screen photographs empty.
 
 on:
   push:
@@ -19,9 +23,9 @@ env:
 
 jobs:
   smoke:
-    name: Boot, seed, launch, screenshot
+    name: Drive the app and photograph it
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
 
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +50,6 @@ jobs:
           set -euo pipefail
           xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
           xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
-          xcrun simctl list devices booted
 
       - name: Seed a synthetic photo library
         run: |
@@ -54,78 +57,51 @@ jobs:
           # The runner's python is externally managed (PEP 668), so pip needs its own venv.
           python3 -m venv /tmp/seedenv
           /tmp/seedenv/bin/pip install --quiet --disable-pip-version-check Pillow piexif
-          # simctl addmedia is slow (seconds per asset), so keep the fixture just big enough
-          # to exercise anniversaries, one dense evening and one burst of near-duplicates.
+          # simctl addmedia costs seconds per asset, so the fixture is just big enough to
+          # exercise anniversaries, one dense evening and one burst of near-duplicates.
           /tmp/seedenv/bin/python Scripts/make_seed_photos.py --out /tmp/seed --count 46
           xcrun simctl addmedia "${{ steps.sim.outputs.udid }}" /tmp/seed/*.jpg
           echo "seeded $(ls /tmp/seed/*.jpg | wc -l) assets"
 
-      - name: Build for simulator
+      - name: Run the UI tour
         run: |
           set -o pipefail
-          xcodebuild \
+          xcodebuild test \
             -project Memories.xcodeproj \
             -scheme Memories \
             -configuration Debug \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath .build \
+            -resultBundlePath Result.xcresult \
             CODE_SIGNING_ALLOWED=NO \
-            build 2>&1 | tail -n 40
+            2>&1 | tail -n 60
 
-      - name: Install and grant Photos access
+      - name: Export screenshots
+        if: always()
         run: |
           set -euo pipefail
-          app=$(find .build/Build/Products -name "Memories.app" -maxdepth 3 | head -n1)
-          echo "installing $app"
-          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$app"
-          xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant photos "$BUNDLE_ID"
-
-      - name: Launch and capture every surface
-        run: |
-          set -euo pipefail
-          udid="${{ steps.sim.outputs.udid }}"
           mkdir -p Screenshots
+          xcrun xcresulttool export attachments \
+            --path Result.xcresult \
+            --output-path Screenshots >/dev/null 2>&1 || true
 
-          shoot() {   # name, settle seconds, launch args...
-            local name="$1"; local settle="$2"; shift 2
-            xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
-            sleep 1
-            xcrun simctl launch "$udid" "$BUNDLE_ID" "$@" >/dev/null
-            sleep "$settle"
-            xcrun simctl io "$udid" screenshot "Screenshots/${name}.png"
-            echo "captured ${name}"
-          }
-
-          # First run of a fresh install: the permission promise screen.
-          shoot 01-onboarding 6
-
-          # Then past it, with time for indexing to have produced something to show.
-          shoot 02-home 55 -skipOnboarding -startTab memories
-          shoot 03-timeline 12 -skipOnboarding -startTab timeline
-          shoot 04-library 10 -skipOnboarding -startTab library
-
-          xcrun simctl ui "$udid" appearance dark
-          shoot 05-home-dark 14 -skipOnboarding -startTab memories
-          xcrun simctl ui "$udid" appearance light
-
+          # Attachments land under per-test folders with a manifest; flatten them out and
+          # give each one the name the test attached, so the artifact is readable.
+          python3 Scripts/flatten_attachments.py Screenshots
           ls -la Screenshots
 
-      - name: Check the app is still alive and did not crash
+      - name: Check for crash reports
+        if: always()
         run: |
           set -euo pipefail
           dev="$HOME/Library/Developer/CoreSimulator/Devices/${{ steps.sim.outputs.udid }}"
-          crashes=$(find "$dev/data/Library/Logs" -name "Memories*.ips" 2>/dev/null || true)
+          crashes=$(find "$dev/data/Library/Logs" -name "Memories-*.ips" 2>/dev/null || true)
           if [ -n "$crashes" ]; then
-            echo "::error::App crashed"
-            for c in $crashes; do echo "--- $c ---"; head -n 60 "$c"; done
-            cp $crashes Screenshots/ 2>/dev/null || true
+            echo "::error::App crashed during the tour"
+            for c in $crashes; do echo "--- $c ---"; head -n 50 "$c"; done
             exit 1
           fi
-          if ! xcrun simctl spawn "${{ steps.sim.outputs.udid }}" launchctl list 2>/dev/null | grep -q "$BUNDLE_ID"; then
-            echo "::error::App is not running after launch"
-            exit 1
-          fi
-          echo "App alive, no crash reports."
+          echo "No crash reports."
 
       - name: Upload screenshots
         if: always()
