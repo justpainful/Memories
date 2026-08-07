@@ -167,6 +167,26 @@ final class AnalysisCoordinator {
         }
         await setStage(.events, progress: 1, through: indexer)
 
+        // Occasions exist now, so this is the moment to find out what their coordinates are
+        // called — and it has to happen here rather than when somebody opens Library › Places.
+        // `placeName` is written in exactly one place in the app, so for as long as that place
+        // was a screen's `onAppear`, a user who never visited that screen had no place names at
+        // all: Best Of's Places section said none had been worked out, searching for a place
+        // matched nothing, and one of the memory engine's twelve kinds could never fire.
+        //
+        // Deliberately not awaited into the stage progress. Reverse geocoding is the one call
+        // this app makes off the device and it is rate-limited by somebody else's service, so
+        // it is spaced out over minutes; holding the indexing pass open for it would make the
+        // whole library look like it was still being read. It resumes from whatever is still
+        // unnamed, so being cut short by the app closing costs nothing.
+        await MainActor.run { PlaceNaming.shared.startDetached(container: container) }
+
+        // Rebuilding the groups moves people between clusters, so whoever the user has hidden
+        // now covers a different set of photographs than they did before this pass. Without
+        // this, a hidden person's newly-clustered photographs come back into memories and the
+        // ones that left their cluster stay hidden forever.
+        await MainActor.run { PersonVisibility.reconcile(context: container.mainContext) }
+
         await runMemories(indexer)
 
         await indexer.updateState {

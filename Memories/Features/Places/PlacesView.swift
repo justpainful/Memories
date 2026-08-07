@@ -125,6 +125,24 @@ final class PlaceNaming {
         }
     }
 
+    /// Start a pass from the indexer, which has a container and no `AppEnvironment`.
+    ///
+    /// Detached from the caller on purpose. This is called at the end of the occasion-building
+    /// stage, and the pass it starts is spaced out over minutes because reverse geocoding is
+    /// rate-limited by somebody else's service. Awaiting it there would hold the indexing pass
+    /// open for the whole of that, and the app would go on saying it was still reading the
+    /// library long after it had finished.
+    func startDetached(container: ModelContainer) {
+        guard task == nil else { return }
+        runID += 1
+        let id = runID
+        progress = .working
+        task = Task { [weak self] in
+            await self?.run(container: container)
+            self?.finish(id)
+        }
+    }
+
     /// Stop the pass where it stands. Everything already written stays written.
     func stop() {
         task?.cancel()
