@@ -114,7 +114,7 @@ struct ExploreTimeBar: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(Palette.textSecondary)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 44, height: 44)
                         .contentShape(.circle)
                 }
                 .buttonStyle(.plain)

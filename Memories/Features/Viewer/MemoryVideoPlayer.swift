@@ -22,7 +22,25 @@ struct MemoryVideoPlayer: View {
     @State private var scrubbing = false
     @State private var scrubTarget: Double = 0
     @State private var isMuted = false
-    @State private var timeObserver: Any?
+
+    /// The periodic time observer, kept together with the player that installed it.
+    ///
+    /// They have to travel as a pair. `AVPlayer` does not return an error when asked to remove
+    /// an observer some *other* player added — it raises, and an unhandled raise from UIKit's
+    /// layout pass is an immediate abort. That is the crash in the report: `stop()`,
+    /// `removeTimeObserver:`, `SIGABRT`.
+    ///
+    /// It happened because the viewer's pager recycles this view. When a page scrolls away and
+    /// comes back holding a different video, `player` is a new object while SwiftUI keeps the
+    /// `@State` from the previous one, so the old token was handed to the new player. Storing
+    /// the player alongside its token means removal always goes back to whoever issued it, and
+    /// clearing the pair means it can never be removed twice.
+    @State private var observation: TimeObservation?
+
+    private struct TimeObservation {
+        let player: AVPlayer
+        let token: Any
+    }
 
     var body: some View {
         ZStack {
@@ -50,11 +68,14 @@ struct MemoryVideoPlayer: View {
 
     private var controls: some View {
         HStack(spacing: Space.m) {
+            // 44 across, which is the smallest target Apple will vouch for and the reason
+            // these were hard to hit: the icon was drawn at 28 and the touch area was the icon.
+            // The glyph is unchanged; only the region that answers a finger grew.
             Button { togglePlayback() } label: {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
                     .contentShape(.circle)
             }
             .buttonStyle(.plain)
@@ -76,16 +97,18 @@ struct MemoryVideoPlayer: View {
                 Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 26, height: 26)
+                    .frame(width: 44, height: 44)
                     .contentShape(.circle)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isMuted ? "Unmute" : "Mute")
         }
         .padding(.horizontal, Space.l)
-        .padding(.vertical, 10)
-        .glassPanel(cornerRadius: 26, tone: .clear)
-        .shadow(color: .black.opacity(0.18), radius: 10, y: 3)
+        .padding(.vertical, 4)
+        .glassPanel(cornerRadius: 28, tone: .clear)
+        // No drop shadow. Glass over a moving picture already separates itself by refracting
+        // it; a shadow underneath as well is what turned this strip into a grey slab pasted
+        // over the video instead of a piece of the app floating on it.
     }
 
     /// A plain track and knob rather than a `Slider`, so it matches the rest of the viewer
@@ -104,7 +127,10 @@ struct MemoryVideoPlayer: View {
                     .offset(x: width * fraction - (scrubbing ? 7 : 5))
                     .shadow(color: .black.opacity(0.25), radius: 2)
             }
-            .frame(height: 20)
+            // The track stays thin; the region that answers a finger does not. A 3-point line
+            // is something to aim at, and scrubbing was the worst of it — the touch area was
+            // the drawing, so a thumb that landed a few points high did nothing at all.
+            .frame(height: 44)
             .contentShape(.rect)
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -120,7 +146,7 @@ struct MemoryVideoPlayer: View {
             )
             .animation(.smooth(duration: 0.15), value: scrubbing)
         }
-        .frame(height: 20)
+        .frame(height: 44)
         .accessibilityLabel("Playback position")
     }
 
@@ -129,13 +155,17 @@ struct MemoryVideoPlayer: View {
     // MARK: Playback
 
     private func start() {
+        // The pager can bring the next video on screen before the last one has finished
+        // leaving, so whatever is still running is torn down before anything new is installed.
+        releaseObservation()
+
         isMuted = player.isMuted
         duration = player.currentItem?.duration.seconds ?? 0
         if duration.isNaN || duration.isInfinite { duration = 0 }
 
         // A tenth of a second is enough to keep the scrubber honest without waking the
         // main thread more than it deserves.
-        timeObserver = player.addPeriodicTimeObserver(
+        let token = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
             queue: .main
         ) { time in
@@ -145,6 +175,7 @@ struct MemoryVideoPlayer: View {
                 duration = itemDuration
             }
         }
+        observation = TimeObservation(player: player, token: token)
 
         if autoplay {
             player.play()
@@ -153,10 +184,16 @@ struct MemoryVideoPlayer: View {
     }
 
     private func stop() {
-        if let timeObserver { player.removeTimeObserver(timeObserver) }
-        timeObserver = nil
+        releaseObservation()
         player.pause()
         isPlaying = false
+    }
+
+    /// Hands the token back to the player that issued it, and only ever once.
+    private func releaseObservation() {
+        guard let observation else { return }
+        observation.player.removeTimeObserver(observation.token)
+        self.observation = nil
     }
 
     private func togglePlayback() {
