@@ -43,6 +43,9 @@ struct HomeView: View {
             }
             .navigationTitle("Memories")
             .navigationBarTitleDisplayMode(.large)
+            // The app draws its own bar; this one would sit underneath it. The modifier has to
+            // be inside the navigation stack to be heard, not wrapped around the tab.
+            .toolbar(.hidden, for: .tabBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {

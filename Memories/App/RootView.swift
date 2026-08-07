@@ -25,8 +25,16 @@ enum AppTab: String, Hashable, CaseIterable, Identifiable {
 /// Three tabs, as decided. Calendar, Places and Search are surfaces inside Timeline and
 /// Library rather than tabs of their own.
 ///
-/// The three stacks stay alive behind one another so switching tabs keeps scroll position,
-/// which is what the system bar would have given us and what the custom bar must not lose.
+/// Switching tabs keeps scroll position, which is what the system bar would have given us and
+/// what the custom bar must not lose. That is `TabView`'s job, and this used to try to do it by
+/// hand — three stacks mounted at once, the unselected two hidden with `.opacity(0)`.
+///
+/// It did not work, and it cost twice over. A `NavigationStack`'s bar is not drawn inside the
+/// subtree the modifier applies to, so opacity never reached it: on device two navigation bars
+/// appeared side by side and the one underneath would not go away, and the accessibility tree
+/// listed all three at once. It was also three times the launch work — every tab ran its own
+/// `.task` and fetched the whole library before anyone had asked to see it, which on a library
+/// of this size is measured in seconds of a blocked screen.
 struct RootView: View {
     @Environment(\.app) private var app
     @Environment(\.scenePhase) private var scenePhase
@@ -108,7 +116,7 @@ struct RootView: View {
 
     private var main: some View {
         ZStack(alignment: .bottom) {
-            ZStack {
+            TabView(selection: $selection) {
                 surface(.memories) { HomeView() }
                 surface(.timeline) { TimelineView() }
                 surface(.library)  { LibraryView() }
@@ -132,13 +140,17 @@ struct RootView: View {
         }
     }
 
-    /// Keeps every tab mounted; only the selected one is visible and interactive.
+    /// One tab.
+    ///
+    /// `TabView` is wanted for what it does underneath — one stack in the hierarchy at a time,
+    /// state kept across switches — and not for its bar, which this app replaces. Each tab
+    /// hides that bar from inside its own navigation stack, which is where the modifier has to
+    /// sit to be heard; the app draws `ExploreTimeBar` in its place, because the specification
+    /// asks for the toolbar's glass to *become* the time panel and that morph is only possible
+    /// when one `GlassEffectContainer` owns both states.
     private func surface<Content: View>(_ tab: AppTab,
                                         @ViewBuilder content: () -> Content) -> some View {
-        content()
-            .opacity(selection == tab ? 1 : 0)
-            .allowsHitTesting(selection == tab)
-            .accessibilityHidden(selection != tab)
+        content().tag(tab)
     }
 }
 

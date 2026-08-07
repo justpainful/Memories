@@ -62,6 +62,7 @@ struct LibraryView: View {
             .contentMargins(.bottom, 132, for: .scrollContent)
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar(.hidden, for: .tabBar)   // the app draws its own; see RootView.surface
         }
         .task { load() }
         .onChange(of: app.library.changeGeneration) { _, _ in load() }

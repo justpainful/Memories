@@ -55,6 +55,7 @@ struct TimelineView: View {
             }
             .navigationTitle("Timeline")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar(.hidden, for: .tabBar)   // the app draws its own; see RootView.surface
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink { CalendarView() } label: {
