@@ -81,7 +81,6 @@ enum LibraryQuery {
     static func passes(_ record: AssetRecord, options: CurationOptions) -> Bool {
         if !options.includeHiddenFromMemories && record.excludedFromMemories { return false }
         if !record.isLocallyAvailable { return false }
-        if !options.includeDownloads && record.isUtilityImage && !record.isScreenshot { return false }
 
         switch options.media {
         case .all:
@@ -142,6 +141,18 @@ enum Curator {
         // 2. Drop the weak, but never empty the memory doing it.
         let strong = kept.filter { $0.memoryScore >= weakThreshold }
         if strong.count >= max(3, kept.count / 4) { kept = strong }
+
+        // 2b. Saved images rather than taken ones.
+        //
+        // iOS exposes no "this was downloaded" flag, so the only available signal is
+        // Vision's judgement that a frame is a document or graphic rather than a
+        // photograph. That judgement is a guess, so it filters here — inside the same
+        // safeguard that stops a memory being emptied — instead of in `passes`, where a
+        // wrong guess would make a photo vanish from the whole app.
+        if !options.includeDownloads {
+            let taken = kept.filter { !$0.isUtilityImage }
+            if taken.count >= max(3, kept.count / 3) { kept = taken }
+        }
 
         // 3. Stop one burst of shooting from becoming the whole memory.
         kept = limitClusterDominance(kept)

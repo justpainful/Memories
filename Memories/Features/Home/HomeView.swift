@@ -155,7 +155,9 @@ struct HomeView: View {
         } else {
             QuietStatusView(
                 title: "Nothing to remember yet",
-                detail: "Once there are photos in your library, memories will start appearing here.",
+                detail: app.coordinator.indexedCount > 0
+                    ? "\(app.coordinator.indexedCount) photos are indexed, but none of them make a memory yet. Memories build up as your library spans more time."
+                    : "Once there are photos in your library, memories will start appearing here.",
                 symbol: "rectangle.stack"
             )
         }
@@ -170,6 +172,7 @@ struct HomeView: View {
                 HeroMemoryCard(candidate: candidate)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("memory.card")
         } else {
             VStack(alignment: .leading, spacing: Space.l) {
                 Button { open(candidate) } label: {
@@ -180,6 +183,7 @@ struct HomeView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("memory.card")
 
                 switch candidate.presentation {
                 case .single:

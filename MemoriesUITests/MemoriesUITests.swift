@@ -40,15 +40,16 @@ final class MemoriesUITests: XCTestCase {
         if !safeTap(app.buttons["Close"]) { app.tap() }
         settle()
 
-        // The feed's first tappable content sits below the filter row.
-        safeTap(app.scrollViews.buttons.element(boundBy: 8), fallback: app.scrollViews.buttons.firstMatch)
+        safeTap(app.buttons["memory.card"].firstMatch)
         capture("03-memory")
 
         safeTap(app.scrollViews.buttons.element(boundBy: 2))
         capture("04-viewer")
         leaveViewer()
         goBack()
+        dismissAnySheet()
 
+        dismissAnySheet()
         safeTap(app.buttons["Timeline"].firstMatch)
         capture("05-timeline")
 
@@ -121,6 +122,17 @@ final class MemoriesUITests: XCTestCase {
     private func goBack() {
         safeTap(app.navigationBars.buttons.element(boundBy: 0))
         settle()
+    }
+
+    /// A sheet left open swallows every later tap, and the rest of the tour then
+    /// photographs the same screen eleven times.
+    private func dismissAnySheet() {
+        for _ in 0..<3 {
+            let done = app.buttons["Done"]
+            guard done.exists, done.isHittable else { return }
+            done.tap()
+            settle()
+        }
     }
 
     // MARK: Helpers
