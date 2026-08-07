@@ -51,8 +51,10 @@ jobs:
       - name: Seed a synthetic photo library
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet --disable-pip-version-check Pillow piexif
-          python3 Scripts/make_seed_photos.py --out /tmp/seed --count 84
+          # The runner's python is externally managed (PEP 668), so pip needs its own venv.
+          python3 -m venv /tmp/seedenv
+          /tmp/seedenv/bin/pip install --quiet --disable-pip-version-check Pillow piexif
+          /tmp/seedenv/bin/python Scripts/make_seed_photos.py --out /tmp/seed --count 84
           xcrun simctl addmedia "${{ steps.sim.outputs.udid }}" /tmp/seed/*.jpg
           echo "seeded $(ls /tmp/seed/*.jpg | wc -l) assets"
 

@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import Photos
+import UIKit
 
 /// A plain-value description of a `PHAsset`, safe to hand to background work.
 ///
