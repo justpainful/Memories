@@ -195,9 +195,7 @@ struct MemoriesShortcuts: AppShortcutsProvider {
             intent: OpenTimeWindowIntent(),
             phrases: [
                 "Show me \(\.$window) in \(.applicationName)",
-                // The bare form is here for the one window nobody would say the long way
-                // round: "Surprise me in Memories".
-                "\(\.$window) in \(.applicationName)",
+                "Open \(\.$window) in \(.applicationName)",
             ],
             shortTitle: "Show a Time",
             systemImageName: "clock.arrow.circlepath"
