@@ -120,20 +120,32 @@ struct PhotoViewerView: View {
 
     // MARK: Revealing the details
 
-    /// Swipe up on the photograph to pull the details panel in, the way Photos does it.
+    /// Vertical swipes on the photograph: up for the details panel, down to leave.
+    ///
+    /// Swipe-down-to-dismiss matters more than it looks. The controls fade after a couple of
+    /// seconds, and a full-screen cover has no interactive dismiss of its own, so without this
+    /// the only way out of a photograph is a button that is no longer on screen — you have to
+    /// know to tap first. Photos has always let you throw the picture away downward, and the
+    /// gesture is what people reach for.
     ///
     /// Two other gestures already want this touch: the pager's horizontal scroll and the tap
     /// that toggles the controls. So this runs *simultaneously* rather than competing — it
-    /// never claims the touch while the finger is down, and it decides only once the finger
-    /// lifts, and only for a swipe that is clearly upward rather than sideways. A horizontal
-    /// flick still turns the page, and a tap never travels far enough to reach here.
+    /// never claims the touch while the finger is down, and decides only once the finger
+    /// lifts, and only when the movement was clearly vertical. A horizontal flick still turns
+    /// the page, and a tap never travels far enough to reach here.
     private var revealDetails: some Gesture {
         DragGesture(minimumDistance: 24)
             .onEnded { value in
-                let rise = -value.translation.height
-                guard rise > 60, abs(value.translation.width) < rise * 0.6 else { return }
+                let vertical = value.translation.height
+                guard abs(vertical) > 60,
+                      abs(value.translation.width) < abs(vertical) * 0.6 else { return }
+
                 Haptics.impact(.soft)
-                showDetails = true
+                if vertical < 0 {
+                    showDetails = true
+                } else {
+                    dismiss()
+                }
             }
     }
 

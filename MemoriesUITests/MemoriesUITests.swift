@@ -101,14 +101,19 @@ final class MemoriesUITests: XCTestCase {
         settle()
     }
 
+    /// Leave the full-screen viewer.
+    ///
+    /// Swiping down is tried first because it is the gesture that always works: the controls
+    /// fade after a couple of seconds, so reaching for the Back button means racing a timer
+    /// that has usually already expired by the time the screenshot is taken.
     private func leaveViewer() {
-        let back = app.buttons["Back"]
-        if !back.exists {
-            app.tap()   // controls auto-hide; a tap brings them back
-        }
-        if !safeTap(back) {
+        for _ in 0..<3 {
+            guard app.buttons["Back"].exists || app.otherElements["Back"].exists
+                    || !app.navigationBars.firstMatch.exists else { break }
             app.swipeDown()
+            settle()
         }
+        if app.buttons["Back"].exists { safeTap(app.buttons["Back"]) }
         settle()
     }
 
