@@ -15,8 +15,10 @@ struct HomeView: View {
                 AmbientWash(identifier: model.candidates.first?.coverIdentifier)
 
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Space.section) {
-                        VStack(alignment: .leading, spacing: Space.l) {
+                    // Tighter than the section gap: the masthead and the first memory belong
+                    // to each other, and 40pt of white between them read as a loading state.
+                    LazyVStack(alignment: .leading, spacing: Space.xl) {
+                        VStack(alignment: .leading, spacing: Space.m) {
                             dateHeadline
                             quickTimeFilters
                         }

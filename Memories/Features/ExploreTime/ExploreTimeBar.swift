@@ -26,16 +26,19 @@ struct ExploreTimeBar: View {
                     .glassEffectID("bar", in: glass)
             } else {
                 HStack(spacing: 18) {
-                    // The bar floats over photography most of the time, and clear glass is
-                    // what lets it actually look like glass — refracting the picture behind
-                    // it and shifting as the device moves — instead of a frosted slab. The
-                    // selection pill and the symbol weights carry legibility instead.
+                    // Regular, not clear. Clear glass was tried here and the screenshots
+                    // settled it: the bar floats over a full-bleed photograph that can be any
+                    // colour, and against a dark one the unselected labels became grey text
+                    // on a dark picture. Regular adapts to what is behind it, which is the
+                    // whole reason it exists. Clear belongs where the content is a photograph
+                    // the user is deliberately looking at — the viewer — and the controls
+                    // should get out of its way.
                     tabs
-                        .glassEffect(.clear.interactive(), in: .capsule)
+                        .glassEffect(.regular.interactive(), in: .capsule)
                         .glassEffectID("bar", in: glass)
 
                     exploreButton
-                        .glassEffect(.clear.interactive(), in: .circle)
+                        .glassEffect(.regular.interactive(), in: .circle)
                         .glassEffectID("explore", in: glass)
                 }
             }
