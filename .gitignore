@@ -1,0 +1,26 @@
+## macOS / Xcode
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.xcresult/
+*.log
+
+## Swift Package Manager
+.build/
+.swiftpm/
+
+## CI artifacts
+Artifacts/
+Screenshots/
+
+## Python helper venv
+.venv/
+__pycache__/

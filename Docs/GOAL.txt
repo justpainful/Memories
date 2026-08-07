@@ -1,0 +1,1723 @@
+إيه. وبالنسبة لـ Memories أنا أشوف التحدي هنا مو إننا نسوي Photos ثاني؛ لازم نسوي تطبيق له سبب واضح للوجود:
+
+تطبيق يقرأ مكتبة صورك محليًا، يفهمها ويرتبها، ويطلع لك الذكريات واللقطات الأفضل بدون ما تطلع صورة واحدة من جهازك.
+
+والنسخة الحالية تكون Standalone iPhone app، بدون Max وبدون حسابات وبدون Backend.
+
+1. القواعد غير القابلة للتفاوض
+
+التطبيق:
+
+
+
+
+
+SwiftUI أصلي.
+
+
+
+مستهدف iOS 26+.
+
+
+
+يعمل محليًا بالكامل.
+
+
+
+بدون تسجيل دخول.
+
+
+
+بدون Backend.
+
+
+
+بدون Analytics خارجية.
+
+
+
+بدون رفع الصور.
+
+
+
+بدون API للذكاء الاصطناعي.
+
+
+
+بدون Cloud processing.
+
+
+
+معالجة الصور بـ Apple frameworks على الجهاز.
+
+
+
+يدعم Full Photo Access وLimited Access.
+
+
+
+لا ينزّل صور iCloud تلقائيًا أثناء عملية الفهرسة.
+
+Apple تسمح للتطبيق بمعرفة حالة صلاحية مكتبة الصور وطلب مستوى الوصول المناسب من خلال `PHPhotoLibrary`. ([Apple Developer](https://developer.apple.com/documentation/photos/phphotolibrary?utm_source=chatgpt.com))
+
+والنقطة الأخيرة مهمة جدًا: في `PHImageRequestOptions` نستخدم:
+
+`isNetworkAccessAllowed = false`
+
+وبالتالي إذا الصورة موجودة فقط في iCloud، Photos لن تقوم بتنزيلها تلقائيًا. Apple توضح أن `false` يمنع تنزيل الأصل من iCloud ويخبر التطبيق أن الأصل غير متوفر محليًا. ([Apple Developer](https://developer.apple.com/documentation/photos/phimagerequestoptions/isnetworkaccessallowed?utm_source=chatgpt.com))
+
+2. الفكرة الأساسية
+
+أول مرة تفتح التطبيق ما يرميك داخل Grid صور.
+
+يظهر لك Onboarding بسيط جدًا:
+
+Your photos. Remembered privately.
+
+ثم يشرح في 3 نقاط فقط:
+
+
+
+
+
+Your library stays on this iPhone.
+
+
+
+Memories analyzes photos locally.
+
+
+
+Nothing is uploaded.
+
+وبعد:
+
+Allow Photo Access
+
+ثم يبدأ Local Library Index.
+
+لكن ما أبي شاشة:
+
+Scanning 1 of 52,492...
+
+بطريقة تقنية قبيحة.
+
+تكون تجربة هادئة:
+
+Getting your memories ready
+
+وتبدأ الذكريات تظهر تدريجيًا حتى لو التحليل الكامل ما انتهى.
+
+3. التطبيق ما ينسخ الصور
+
+قاعدة معمارية مهمة:
+
+Memories ما يسوي نسخة ثانية من مكتبة الصور.
+
+نخزن فقط:
+
+
+
+
+
+`PHAsset.localIdentifier`
+
+
+
+timestamps
+
+
+
+dimensions
+
+
+
+media type
+
+
+
+duration
+
+
+
+location metadata عند توفرها
+
+
+
+computed features
+
+
+
+quality score
+
+
+
+similarity cluster
+
+
+
+memory memberships
+
+
+
+user preferences
+
+يعني قاعدة بيانات التطبيق ممكن تحتوي عشرات الآلاف من السجلات بدون تخزين عشرات الآلاف من الصور.
+
+الأصل يبقى داخل Photos.
+
+4. الصفحة الرئيسية — Memories
+
+أهم شاشة.
+
+مو Grid.
+
+شيء أقرب إلى مجلة شخصية متغيرة يوميًا.
+
+مثلاً اليوم تفتح التطبيق:
+
+A year ago today
+
+صورة كبيرة.
+
+ثم:
+
+This week in 2023
+
+مجموعة من 12 صورة.
+
+ثم:
+
+Three summers ago
+
+فيديو + عدة صور.
+
+ثم:
+
+A night you photographed a lot
+
+18 صورة مرتبة من حدث واحد.
+
+ثم:
+
+August over the years
+
+2026
+
+2025
+
+2024
+
+2023
+
+2022
+
+وهكذا.
+
+الصفحة نفسها تختلف كل يوم.
+
+5. نظام الفلاتر
+
+وهنا نقدر نتفوق بشكل كبير على Photos.
+
+نحافظ أيضًا على الأفكار اللي كانت عندنا سابقًا مثل:
+
+
+
+
+
+This Week
+
+
+
+Previous Week
+
+
+
+On This Day
+
+
+
+Random
+
+
+
+Photos / Videos
+
+
+
+Pure / Smart
+
+لكن نوسعها جدًا.
+
+Time
+
+
+
+
+
+Today
+
+
+
+Yesterday
+
+
+
+This Week
+
+
+
+Last Week
+
+
+
+This Month
+
+
+
+Last Month
+
+
+
+This Year
+
+
+
+Last Year
+
+Historical
+
+
+
+
+
+On This Day
+
+
+
+A Year Ago
+
+
+
+2 Years Ago
+
+
+
+3 Years Ago
+
+
+
+5 Years Ago
+
+
+
+10 Years Ago
+
+
+
+This Week Last Year
+
+
+
+This Week in Previous Years
+
+
+
+This Month in Previous Years
+
+
+
+This Season in Previous Years
+
+
+
+Same Weekend in Previous Years
+
+Cross-year
+
+مثلاً:
+
+Every August
+
+يعرض:
+
+August 2026
+
+August 2025
+
+August 2024
+
+August 2023
+
+أو:
+
+Your Januarys
+
+وهكذا.
+
+6. الفلاتر الذكية
+
+ثم عندنا الجيل الثاني:
+
+Best of...
+
+أفضل:
+
+
+
+
+
+اليوم
+
+
+
+الأسبوع
+
+
+
+الشهر
+
+
+
+السنة
+
+
+
+رحلة
+
+
+
+مكان
+
+
+
+حدث
+
+Forgotten
+
+صور جيدة جدًا ما فتحتها من فترة طويلة.
+
+Rarely Seen
+
+صور قوية لكن ما تظهر عادة في Memories.
+
+Recently Rediscovered
+
+ذكريات رجعت لها مؤخرًا.
+
+Random Memory
+
+لكن مو Random أعمى.
+
+Smart Random يتجنب:
+
+
+
+
+
+screenshots
+
+
+
+duplicates
+
+
+
+الصور السيئة
+
+
+
+الصور اللي شفتها قبل قليل
+
+7. Events
+
+التطبيق يحاول يفهم إن مجموعة الصور جزء من نفس الحدث.
+
+مثلاً:
+
+Friday
+8:02 PM     Home
+8:45 PM     Riyadh
+9:13 PM     14 photos
+9:20 PM     3 videos
+10:05 PM    22 photos
+
+
+بدل ما يشوفها 39 ملف منفصل، يفهم:
+
+حدث واحد مدته تقريبًا ساعة.
+
+ويطلع:
+
+Friday Night
+
+39 moments
+
+العوامل:
+
+
+
+
+
+الوقت بين الصور.
+
+
+
+المكان.
+
+
+
+كثافة التصوير.
+
+
+
+التشابه البصري.
+
+
+
+الأشخاص.
+
+
+
+نوع المحتوى.
+
+8. Duplicate Intelligence
+
+هذه بالنسبة لي من أهم ميزات التطبيق.
+
+لو عندك:
+
+IMG_1001
+IMG_1002
+IMG_1003
+IMG_1004
+IMG_1005
+
+
+وكلها لنفس اللقطة تقريبًا، التطبيق يصنع:
+
+Similarity Cluster
+
+ويختار:
+
+Best Shot
+
+البقية ما تنحذف.
+
+فقط تختفي من Smart Memories.
+
+وتقدر تضغط:
+
+Show all 5
+
+9. كيف يعرف الصور المتشابهة؟
+
+Apple Vision عندها `GenerateImageFeaturePrintRequest`، والتي تنتج تمثيل Features للصورة يمكن استخدامه لمقارنة المحتوى بصريًا. ([Apple Developer](https://developer.apple.com/documentation/vision/generateimagefeatureprintrequest?utm_source=chatgpt.com))
+
+فنعمل pipeline تقريبًا:
+
+Photo
+ ↓
+thumbnail
+ ↓
+Vision Feature Print
+ ↓
+Similarity Index
+ ↓
+Cluster
+
+
+ثم:
+
+Cluster #428
+
+IMG_3290    similarity 0.98
+IMG_3291    similarity 0.97
+IMG_3292    similarity 0.96
+IMG_3293    similarity 0.89
+
+
+فتتعامل Memories معها كمجموعة واحدة.
+
+10. اختيار أفضل صورة
+
+وهنا ما نعتمد على معيار واحد.
+
+نعطي كل صورة Memory Quality Score.
+
+يأخذ في الاعتبار:
+
+
+
+
+
+sharpness
+
+
+
+blur
+
+
+
+exposure
+
+
+
+composition
+
+
+
+faces
+
+
+
+face quality
+
+
+
+subject prominence
+
+
+
+resolution
+
+
+
+screenshot penalty
+
+
+
+duplicate penalty
+
+
+
+burst position
+
+
+
+visual aesthetics
+
+Apple Vision لديها أصلًا `CalculateImageAestheticsScoresRequest` لتحليل الصفات الجمالية للصورة. ([Apple Developer](https://developer.apple.com/documentation/vision/calculateimageaestheticsscoresrequest?language=o_4&utm_source=chatgpt.com))
+
+فتكون عندنا مثلاً:
+
+Aesthetic           0.83
+Sharpness           0.94
+Face quality        0.91
+Resolution          1.00
+Duplicate penalty  -0.04
+Screenshot penalty  0.00
+
+Memory score         0.91
+
+
+لكن المستخدم ما يشوف الأرقام هذه.
+
+هي internal ranking.
+
+11. صور الأشخاص
+
+هذي بالذات لازم تكون أذكى.
+
+لو عندنا ست صور شبه متطابقة لشخص:
+
+واحدة:
+
+
+
+
+
+عيونه مغلقة.
+
+وحدة:
+
+
+
+
+
+blurry.
+
+وحدة:
+
+
+
+
+
+إضاءة ضعيفة.
+
+وحدة:
+
+
+
+
+
+ممتازة.
+
+Vision توفر Face Capture Quality، وهي مصممة أصلًا لمقارنة جودة لقطات الوجه وتأخذ بعين الاعتبار أشياء مثل الإضاءة والـblur والـposition. ([Apple Developer](https://developer.apple.com/documentation/Vision/selecting-a-selfie-based-on-capture-quality?utm_source=chatgpt.com))
+
+فالتطبيق يقدر يعطي أولوية للقطة الأفضل.
+
+بدون أي Cloud AI.
+
+12. Smart / Pure
+
+أبقي هذا القرار القديم لأنه ممتاز جدًا.
+
+Pure
+
+ما فيه تدخل ذكي في اختيار الصور.
+
+مثلاً تقول:
+
+This Week · 2022
+
+يعطيك كل الصور بالترتيب.
+
+Smart
+
+نفس المدة لكن Memories:
+
+
+
+
+
+يزيل duplicates من العرض.
+
+
+
+يخفي الصور الضعيفة.
+
+
+
+يوازن بين الفيديو والصور.
+
+
+
+يختار Best Shots.
+
+
+
+يجمع الأحداث.
+
+
+
+يمنع 20 صورة متشابهة من احتلال الذكرى.
+
+وتقدر تغير بينهم فورًا.
+
+13. Memory Viewer
+
+لما تفتح ذكرى ما أبي نسوي Story clone.
+
+تكون تجربة Full Screen.
+
+الصورة نفسها هي البطلة.
+
+وفي الأسفل Floating Liquid Glass controls:
+
+←        ♡        •••
+
+
+وتقدر Swipe.
+
+لو فيديو:
+
+يشتغل بشكل native.
+
+لو Live Photo:
+
+يدعم Live Photo الأصلي.
+
+ومن `•••`:
+
+
+
+
+
+Show in Photos
+
+
+
+Share
+
+
+
+Hide from Memories
+
+
+
+Show Similar Photos
+
+
+
+Show Event
+
+
+
+Show This Day
+
+
+
+Use as Cover
+
+
+
+Details
+
+14. Hide ≠ Delete
+
+مهم جدًا.
+
+Hide from Memories
+
+ما يحذف الصورة من Photos.
+
+فقط:
+
+excludedFromMemories = true
+
+
+ونضيف صفحة:
+
+Hidden Memories
+
+ومنها Restore.
+
+15. Collections
+
+المستخدم يقدر يحفظ ذكريات يدوية.
+
+مثلاً:
+
+2024
+
+ثم:
+
+Favorite Nights
+
+أو:
+
+Cars
+
+لكن هذه ما تكون Albums تقليدية فقط.
+
+تقدر تحفظ:
+
+
+
+
+
+Photo
+
+
+
+Video
+
+
+
+Event
+
+
+
+Day
+
+
+
+Smart Memory
+
+داخل Collection.
+
+16. Timeline
+
+هذه أعتبرها ثاني أهم شاشة بعد Home.
+
+Timeline عمودي.
+
+مثلاً:
+
+2026
+│
+├── August
+│   ├── Aug 7
+│   ├── Aug 5
+│   └── Aug 1
+│
+├── July
+│
+2025
+│
+2024
+│
+2023
+
+
+لكن بدل قوائم نصية فقط تظهر thumbnails موزعة بهدوء.
+
+وتقدر تسحب بسرعة عبر السنوات.
+
+17. Calendar
+
+واجهة تقويم بصرية.
+
+كل يوم عليه صورة Cover صغيرة.
+
+مثلاً:
+
+SUN MON TUE WED THU FRI SAT
+
+                1   2
+ 3   4   5   6   7   8   9
+10  11  12  13  14  15  16
+
+
+اليوم اللي فيه صور يظهر thumbnail.
+
+اضغط 7 أغسطس:
+
+August 7
+
+ثم:
+
+2026
+
+2025
+
+2024
+
+2023
+
+2022
+
+هذه بتكون ممتازة جدًا لفكرة الذكريات.
+
+18. Places
+
+إذا الصور تحتوي Location metadata:
+
+واجهة Map native.
+
+لكن مو هدفها تكون Google Photos clone.
+
+تدخل مكان:
+
+Riyadh
+
+ويظهر:
+
+2019     83
+2020    210
+2021    541
+...
+
+
+ثم الذكريات والأحداث.
+
+كل شيء يعتمد على metadata الموجود أصلًا.
+
+19. Search
+
+بدون Server.
+
+في البداية البحث يكون:
+
+
+
+
+
+Date
+
+
+
+Month
+
+
+
+Year
+
+
+
+Media type
+
+
+
+Location
+
+
+
+Favorites
+
+
+
+Screenshots
+
+
+
+Videos
+
+
+
+Live Photos
+
+
+
+Collections
+
+ثم لاحقًا ممكن ندخل Local semantic indexing.
+
+لكن ما أبي نربط نجاح النسخة الأولى بشيء معقد مثل:
+
+ابحث لي عن سيارة سوداء وقت المطر.
+
+هذا Phase لاحقة.
+
+20. Memory Engine
+
+هذه روح البرنامج.
+
+مو مجرد Filters.
+
+أسوي Component مستقل:
+
+MemoryEngine
+
+يولد Candidates مثل:
+
+OnThisDayCandidate
+ThisWeekCandidate
+PreviousYearsCandidate
+EventCandidate
+PlaceCandidate
+ForgottenCandidate
+BestOfMonthCandidate
+BestOfYearCandidate
+SeasonCandidate
+RandomCandidate
+RediscoveryCandidate
+
+
+ثم يعطي كل Candidate Score:
+
+relevance
+quality
+novelty
+time significance
+media diversity
+duplicate density
+recent exposure
+
+
+ثم Home Feed يبنى منها.
+
+وبكذا التطبيق ما يعرض نفس الذكريات كل يوم.
+
+21. منع التكرار المزعج
+
+نخزن محليًا:
+
+memoryShownAt
+assetShownCount
+lastShownAt
+memoryOpened
+memoryDismissed
+memorySaved
+
+
+إذا عرض لك:
+
+This Week in 2022
+
+اليوم، ما يعيد نفس المجموعة بكرة إلا إذا عنده سبب.
+
+22. تعلم محلي من المستخدم
+
+بدون AI Server.
+
+لو المستخدم دائمًا:
+
+
+
+
+
+يحفظ صور معينة.
+
+
+
+يتجاوز screenshots.
+
+
+
+يحب فيديوهات أكثر.
+
+
+
+يخفي نوع معين من الذكريات.
+
+نعدل Ranking محليًا.
+
+مثلاً:
+
+userPrefersVideos += 0.03
+
+
+لكن بدون profiles مخيفة أو opaque AI.
+
+ويكون فيه:
+
+Reset Memory Suggestions
+
+يمسح التعلم.
+
+23. Screenshots
+
+لازم نتعامل معها بشكل خاص.
+
+لأن مكتبات الناس مليانة screenshots.
+
+Default:
+
+Screenshots لا تدخل Memories العاطفية بشكل طبيعي.
+
+لكن لها قسم:
+
+Screenshots
+
+وتقدر تغير:
+
+Settings → Memories → Include Screenshots
+
+24. Videos
+
+ما نعامل الفيديو كصورة طويلة.
+
+نحلل frames محدودة منه محليًا.
+
+نحدد:
+
+
+
+
+
+representative frame
+
+
+
+visual quality
+
+
+
+duration
+
+
+
+event membership
+
+ومن ثم نختار Cover مناسب.
+
+Apple نفسها تشير لاستخدام image-aesthetics scoring لاختيار إطارات جذابة من الفيديو. ([Apple Developer](https://developer.apple.com/documentation/vision/calculateimageaestheticsscoresrequest?language=o_4&utm_source=chatgpt.com))
+
+25. واجهة Liquid Glass
+
+وهنا أتفق مع شرطك 100%.
+
+ممنوع:
+
+.ultraThinMaterial
+.thinMaterial
+.regularMaterial
+.blur(...)
+opacity fake glass
+gradient fake glass
+
+
+وممنوع نصنع Rectangle رمادي شفاف ونقول Liquid Glass.
+
+نستخدم Liquid Glass الحقيقي الذي توفره SwiftUI:
+
+.glassEffect()
+
+
+و:
+
+GlassEffectContainer
+glassEffectID
+glassEffectTransition
+
+
+Apple توضح أن `GlassEffectContainer` يجمع عدة Liquid Glass shapes ويجعلها تتفاعل وتتحول إلى بعضها، بدل مجموعة blur layers مصطنعة. ([Apple Developer](https://developer.apple.com/documentation/swiftui/glasseffectcontainer?changes=__3&utm_source=chatgpt.com))
+
+26. لكن ما نغرق الشاشة Glass
+
+هذه مهمة.
+
+Liquid Glass يكون طبقة التحكم.
+
+وليس خلفية كل شيء.
+
+الصورة نفسها:
+
+████████████████████
+████    PHOTO   ████
+████████████████████
+
+       [ controls ]
+
+
+الـGlass يظهر في:
+
+
+
+
+
+navigation.
+
+
+
+filters.
+
+
+
+floating controls.
+
+
+
+segmented controls.
+
+
+
+menus.
+
+
+
+toolbars.
+
+
+
+transient UI.
+
+
+
+selection controls.
+
+ولا نحط كل Card داخل glass container.
+
+بيصير تطبيق demo لـWWDC بدل تطبيق صور.
+
+27. الـGlass morphing
+
+هذه تحديدًا أبغاها تكون Signature للتطبيق.
+
+مثلاً عندك أسفل Home:
+
+[ Memories ] [ Timeline ] [ Library ]
+
+
+تضغط Filter.
+
+الـGlass الخاص بالToolbar يتحول إلى:
+
+[ This Week ] [ On This Day ] [ Random ]  ×
+
+
+باستخدام:
+
+`GlassEffectContainer`
+
+
+
+
+
+
+
+`glassEffectID`
+
+بدل ظهور Sheet بلا علاقة.
+
+Apple صممت `glassEffectID` تحديدًا لمساعدة SwiftUI في تحريك وتحويل أشكال Liquid Glass بين الحالات. ([Apple Developer](https://developer.apple.com/documentation/swiftui/view/glasseffectid%28_%3Ain%3A%29?utm_source=chatgpt.com))
+
+28. Navigation
+
+أنا ما أبي خمسة Tabs.
+
+ثلاثة تكفي:
+
+Memories
+
+الصفحة الذكية.
+
+Timeline
+
+كل مكتبتك زمنيًا.
+
+Library
+
+الدخول المباشر إلى:
+
+
+
+
+
+All
+
+
+
+Photos
+
+
+
+Videos
+
+
+
+Live Photos
+
+
+
+Screenshots
+
+
+
+Collections
+
+
+
+Hidden
+
+أما:
+
+
+
+
+
+Calendar
+
+
+
+Places
+
+
+
+Search
+
+تكون surfaces داخل Timeline/Library، مو Tab لكل شيء.
+
+29. شكل الصفحة الرئيسية الذي أتخيله
+
+              Memories
+
+Friday, August 7
+
+
+ ┌──────────────────────────┐
+ │                          │
+ │      HERO MEMORY         │
+ │                          │
+ │  Two years ago today     │
+ └──────────────────────────┘
+
+
+This week through the years
+
+[ 2025 ] [ 2024 ] [ 2023 ]
+  photo    photo     photo
+
+
+A night worth remembering
+
+┌────────────┬───────┐
+│            │       │
+│            ├───────┤
+│            │       │
+└────────────┴───────┘
+
+
+August 2021
+26 moments
+
+
+        [ floating glass nav ]
+
+
+الصور نفسها تعطي الشاشة ألوانها.
+
+واجهة التطبيق الأساسية Neutral جدًا.
+
+30. Library Analyzer
+
+أقسم الفهرسة إلى مراحل بدل تحليل كل شيء دفعة واحدة.
+
+Stage 1 — Metadata
+
+سريع جدًا:
+
+
+
+
+
+ID
+
+
+
+date
+
+
+
+media type
+
+
+
+duration
+
+
+
+dimensions
+
+
+
+favorite
+
+
+
+location
+
+فتشتغل Timeline مباشرة.
+
+Stage 2 — Thumbnails
+
+يجهز cache.
+
+Stage 3 — Similarity
+
+Feature prints.
+
+Stage 4 — Quality
+
+Aesthetics + face quality.
+
+Stage 5 — Events
+
+يعمل clustering.
+
+Stage 6 — Memories
+
+يبني الاقتراحات.
+
+31. ما نعيد تحليل المكتبة كل مرة
+
+نحفظ:
+
+Analysis Version
+
+مثلاً:
+
+analysisVersion = 3
+
+
+إذا التطبيق فتح مرة ثانية:
+
+52,103 assets indexed
+17 new
+3 removed
+6 modified
+
+
+نحلل فقط التغييرات.
+
+`PHPhotoLibrary` توفر أيضًا آلية لمعرفة التغييرات في مكتبة الصور ومراقبتها، فلا نحتاج إعادة بناء الفهرس كاملًا. ([Apple Developer](https://developer.apple.com/documentation/photos/phphotolibrary?utm_source=chatgpt.com))
+
+32. قاعدة البيانات
+
+أنا أميل إلى:
+
+SwiftData
+
+للميتاداتا المحلية.
+
+Models تقريبًا:
+
+AssetRecord
+EventCluster
+SimilarityCluster
+MemoryRecord
+MemoryCandidate
+CollectionRecord
+ExposureRecord
+AnalysisState
+UserPreference
+
+
+لكن `PHAsset` نفسه ما نحاول نخزنه.
+
+نخزن identifier ونرجع نطلبه من Photos.
+
+33. الأداء
+
+بعض المستخدمين عندهم:
+
+100,000+ صورة.
+
+لذلك ممنوع:
+
+Load all full-resolution images
+→ Run Vision
+
+
+كارثة.
+
+نستخدم:
+
+
+
+
+
+thumbnail resolution للتحليل الأولي.
+
+
+
+batching.
+
+
+
+background tasks.
+
+
+
+Task priority management.
+
+
+
+caching.
+
+
+
+incremental indexing.
+
+
+
+thermal state awareness.
+
+
+
+battery awareness.
+
+والتحليل الثقيل يوقف إذا الجهاز صار تحت ضغط.
+
+34. مساحة التخزين
+
+Settings:
+
+Storage
+
+Database              84 MB
+Analysis Cache        312 MB
+Thumbnails            148 MB
+────────────────────────────
+Total                 544 MB
+
+
+زر:
+
+Clear Analysis Cache
+
+ما يمس الصور.
+
+ثم يعيد توليده عند الحاجة.
+
+35. Privacy Dashboard
+
+أبي هذه موجودة.
+
+Privacy
+
+Photos access
+Full Library
+
+Processed on this iPhone
+52,103 items
+
+Uploaded
+0
+
+External AI services
+None
+
+External analytics
+None
+
+
+مو فقط Marketing.
+
+لازم التطبيق فعلًا مصمم كذا.
+
+36. Settings
+
+ما نكثرها.
+
+Memories
+
+Smart Curation
+
+Include Screenshots
+
+Include Screen Recordings
+
+Include Downloads
+
+Memory Frequency
+
+Library
+
+Photo Access
+
+Reindex Library
+
+Playback
+
+Autoplay Videos
+
+Live Photos
+
+Audio
+
+Appearance
+
+System
+
+Light
+
+Dark
+
+Privacy
+
+Local Processing
+
+Reset Suggestions
+
+Clear Analysis Data
+
+37. أشياء أرفض نحطها
+
+من البداية:
+
+
+
+
+
+Social feed.
+
+
+
+Accounts.
+
+
+
+Profiles.
+
+
+
+Followers.
+
+
+
+Comments.
+
+
+
+Uploads.
+
+
+
+AI chatbot.
+
+
+
+Cloud sync خاص فينا.
+
+
+
+Subscription screen.
+
+
+
+Generic photo editor.
+
+
+
+Filters مثل Instagram.
+
+
+
+Stickers.
+
+
+
+Templates.
+
+
+
+Fake glass.
+
+
+
+AI-generated memory captions من Server.
+
+
+
+محاولة تقليد Photos حرفيًا.
+
+كل واحدة منها تشوش هدف التطبيق.
+
+والميزة اللي أعتقد بتحدد شخصية التطبيق
+
+مو الـLiquid Glass.
+
+ولا الـAI.
+
+ولا حتى On This Day.
+
+هي:
+
+Explore Time
+
+تضغط زر واحد ويطلع لك Glass control:
+
+Today
+This Week
+This Month
+This Year
+────────────
+On This Day
+This Week Through Years
+This Month Through Years
+Same Season
+────────────
+1 Year Ago
+2 Years Ago
+3 Years Ago
+5 Years Ago
+10 Years Ago
+────────────
+Surprise Me
+
+
+وتقدر تتنقل في مكتبتك كأن الزمن نفسه هو واجهة التطبيق.
+
+هنا يصير Memories منتج له شخصية خاصة، وليس مجرد Photos بواجهة ثانية.
+
+وأنا أقترح أن نبني كل التطبيق حول ثلاث كلمات:
+
+Remember · Explore · Rediscover
+
+والخطوة التالية المنطقية عندي هي نحسم كل شاشة من شاشات التطبيق واحدة واحدة: Home + Explore Time + Memory Viewer + Timeline + Library + Settings ونحدد حرفيًا شكلها، الـnavigation، الأزرار، الانتقالات، ومتى وأين يستخدم Liquid Glass قبل ما نكتب أي Swift.
+
+
+
+احتاجك تبني التطبيق كامل تحدد معاي القرارات  بنفسك لا تسألني عن شيء الي يحتاج أني اعرفه قولي أياه بعدين ، بعد إنتهائك أحتاجك تدفع إلى قيتهب https://github.com/justpainful/Memories حاليًا احذف الي داخل الريبو كامل وابدا من الصفر محليًا ثم أدفع لقيتهب استخدم الـ CI لمعرفه الأخطاء سواء برمجيًا او الأخطاء البصرية كثيرًا تظهر اخطاء مثل أن الشاشة مقصوصه من الأعلى والأسفل وتظهر بشكل مربع والباقي باللون الأسود  احتاجلها حل حتى قبل تظهر 
+
+
+
+لا تخلي التصميم جينيرك وغبي  أهم جزء من التطبيق هو التصميم وأن التطبيق يعمل أيضًا جدًا مهم لا احتاج ميزه لا تعمل في التطبيق فشل حاتم أن ميزه او زر او اي شيء يظهر بكراشات او لا يعمل. أحتاج التطبيق يظهر كأنه جزء من النظام مثل تطبيق الصور ولكن مخصص للذكريات ، لا تنسى أيقونه التطبيق ، أستخدم أسلوب أبل في التطبيقات الحديثة في تطبيقاتها مثل الإعدادات تطبيق الصور الـ Notes إلخ إلخ ما احتاج احس أن التطبيق من شركة او شي زي كذا ابدًا..
+
+
+
+أطلق Subagents و workflows قد ماتحتاج .

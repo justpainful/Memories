@@ -1,0 +1,130 @@
+name: UI Smoke
+
+# Compile-only CI cannot catch the failure mode that actually hurts here: a screen that
+# renders letterboxed, cropped, or blank. This lane boots a real simulator, seeds it with a
+# synthetic photo library, launches the app, and captures screenshots as artifacts so the
+# UI can be looked at rather than assumed.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ui-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUNDLE_ID: com.justpainful.Memories
+
+jobs:
+  smoke:
+    name: Boot, seed, launch, screenshot
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          set -euo pipefail
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n1)
+          [ -n "$latest" ] && sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+
+      - name: Pick a simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          # newest available iPhone on the newest available iOS runtime
+          udid=$(xcrun simctl list devices available --json \
+            | python3 -c '
+import json,sys,re
+d=json.load(sys.stdin)["devices"]
+best=None
+def key(rt):
+    m=re.findall(r"(\d+)", rt)
+    return tuple(int(x) for x in m) if m else (0,)
+for rt in sorted(d, key=key, reverse=True):
+    if "iOS" not in rt: continue
+    phones=[x for x in d[rt] if x.get("isAvailable") and "iPhone" in x["name"]]
+    if phones:
+        phones.sort(key=lambda p: p["name"])
+        best=phones[-1]; print(best["udid"]); print(best["name"], rt, file=sys.stderr); break
+')
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          echo "Using simulator $udid"
+
+      - name: Boot simulator
+        run: |
+          set -euo pipefail
+          xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+          xcrun simctl list devices booted
+
+      - name: Seed a synthetic photo library
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --disable-pip-version-check Pillow piexif
+          python3 Scripts/make_seed_photos.py --out /tmp/seed --count 84
+          xcrun simctl addmedia "${{ steps.sim.outputs.udid }}" /tmp/seed/*.jpg
+          echo "seeded $(ls /tmp/seed/*.jpg | wc -l) assets"
+
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Memories.xcodeproj \
+            -scheme Memories \
+            -configuration Debug \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath .build \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tail -n 40
+
+      - name: Install and grant Photos access
+        run: |
+          set -euo pipefail
+          app=$(find .build/Build/Products -name "Memories.app" -maxdepth 3 | head -n1)
+          echo "installing $app"
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$app"
+          xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant photos "$BUNDLE_ID"
+
+      - name: Launch and capture
+        run: |
+          set -euo pipefail
+          mkdir -p Screenshots
+          xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" "$BUNDLE_ID" \
+            > Screenshots/console.log 2>&1 &
+          for i in 3 8 16 26; do
+            sleep "$i"
+            xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot "Screenshots/t${i}s.png" || true
+          done
+          ls -la Screenshots
+
+      - name: Check the app is still alive and did not crash
+        run: |
+          set -euo pipefail
+          dev="$HOME/Library/Developer/CoreSimulator/Devices/${{ steps.sim.outputs.udid }}"
+          crashes=$(find "$dev/data/Library/Logs" -name "Memories*.ips" 2>/dev/null || true)
+          if [ -n "$crashes" ]; then
+            echo "::error::App crashed"
+            for c in $crashes; do echo "--- $c ---"; head -n 60 "$c"; done
+            cp $crashes Screenshots/ 2>/dev/null || true
+            exit 1
+          fi
+          if ! xcrun simctl spawn "${{ steps.sim.outputs.udid }}" launchctl list 2>/dev/null | grep -q "$BUNDLE_ID"; then
+            echo "::error::App is not running after launch"
+            cat Screenshots/console.log || true
+            exit 1
+          fi
+          echo "App alive, no crash reports."
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: Screenshots
+          retention-days: 14

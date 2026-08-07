@@ -1,0 +1,70 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (iOS Simulator)
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe toolchain
+        run: |
+          set -euo pipefail
+          echo "## Toolchain" >> "$GITHUB_STEP_SUMMARY"
+          sw_vers | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "--- Installed Xcodes ---"
+          ls -d /Applications/Xcode*.app 2>/dev/null || echo "none"
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n1)
+          if [ -n "$latest" ]; then
+            echo "Selecting $latest"
+            sudo xcode-select -s "$latest/Contents/Developer"
+          fi
+          xcodebuild -version | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "--- iOS SDKs ---"
+          xcodebuild -showsdks 2>/dev/null | grep -i "iphone" || true
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Memories.xcodeproj \
+            -scheme Memories \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee build.log
+
+      - name: Report diagnostics
+        if: always()
+        run: |
+          {
+            echo "## Diagnostics"
+            if grep -hoE "^[^ ].*: (error|warning): .*" build.log | sort -u > diags.txt && [ -s diags.txt ]; then
+              echo '```'
+              head -n 120 diags.txt
+              echo '```'
+            else
+              echo "Clean — no errors or warnings."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
