@@ -101,7 +101,7 @@ struct CuratorTests {
         options.mode = .pure
         let output = Curator.curate(input, options: options)
 
-        #expect(output.map(\.localIdentifier) == input.map(\.localIdentifier))
+        #expect(output.map({ $0.localIdentifier }) == input.map({ $0.localIdentifier }))
     }
 
     @Test("A handful of frames is left alone — there is nothing there to curate")
@@ -129,7 +129,10 @@ struct CuratorTests {
         let output = Curator.curate(input, options: CurationOptions())
 
         #expect(output.count == 4)
-        #expect(output.allSatisfy(\.isBestInSimilarityCluster))
+        // Closure rather than a key path: passing a key path to a `rethrows` function inside
+        // the autoclosure `#expect` builds leaves the compiler unable to prove the call
+        // cannot throw.
+        #expect(output.allSatisfy({ $0.isBestInSimilarityCluster }))
     }
 
     @Test("No burst is allowed to become the whole memory")
