@@ -49,30 +49,30 @@ final class MemoriesUITests: XCTestCase {
         goBack()
         dismissAnySheet()
 
-        dismissAnySheet()
+        returnToRoot()
         safeTap(app.buttons["Timeline"].firstMatch)
         capture("05-timeline")
 
+        returnToRoot()
         safeTap(app.buttons["Library"].firstMatch)
         capture("06-library")
 
-        openRow("Calendar")
-        capture("07-calendar")
-        goBack()
-
-        openRow("Search")
-        capture("08-search")
-        goBack()
+        for (row, name) in [("People", "07-people"), ("Best Of", "08-best-of"),
+                            ("Calendar", "09-calendar"), ("Search", "10-search")] {
+            openRow(row)
+            capture(name)
+            returnToRoot()
+            safeTap(app.buttons["Library"].firstMatch)
+        }
 
         openRow("Settings")
-        capture("09-settings")
+        capture("11-settings")
         openRow("Local Processing")
-        capture("10-privacy")
-        goBack()
-        goBack()
+        capture("12-privacy")
+        returnToRoot()
 
         safeTap(app.buttons["Memories"].firstMatch)
-        capture("11-home-again")
+        capture("13-home-again")
 
         XCTAssertTrue(app.state == .runningForeground, "The app did not survive the tour")
     }
@@ -122,6 +122,24 @@ final class MemoriesUITests: XCTestCase {
     private func goBack() {
         safeTap(app.navigationBars.buttons.element(boundBy: 0))
         settle()
+    }
+
+    /// Get back to a tab's own root before doing anything else.
+    ///
+    /// The tour previously assumed one `goBack()` was enough. When a step failed to open what
+    /// it expected, the app stayed one screen deep, the tab buttons underneath were
+    /// unreachable, and every later capture photographed the same view — which reads in the
+    /// artifacts as though the whole app were broken.
+    private func returnToRoot() {
+        dismissAnySheet()
+        for _ in 0..<4 {
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            guard back.exists, back.isHittable,
+                  app.buttons["Memories"].firstMatch.isHittable == false else { break }
+            back.tap()
+            settle()
+        }
+        dismissAnySheet()
     }
 
     /// A sheet left open swallows every later tap, and the rest of the tour then
