@@ -83,20 +83,15 @@ extension AssetRecord {
     var isPhoto: Bool { mediaType == .image }
     var isScreenshot: Bool { mediaSubtypes.contains(.photoScreenshot) }
     var isLivePhoto: Bool { mediaSubtypes.contains(.photoLive) }
-    var isScreenRecording: Bool { isVideo && mediaSubtypes.contains(.videoHighFrameRate) == false && duration > 0 && isScreenshotLikeVideo }
     var isPanorama: Bool { mediaSubtypes.contains(.photoPanorama) }
 
-    /// Screen recordings carry no dedicated subtype, so they are inferred from the exact
-    /// screen aspect ratio plus the absence of any capture metadata.
-    private var isScreenshotLikeVideo: Bool {
-        guard pixelWidth > 0, pixelHeight > 0 else { return false }
-        return latitude == nil && aspectRatioLooksLikeScreen
-    }
-
-    private var aspectRatioLooksLikeScreen: Bool {
-        let ratio = Double(max(pixelWidth, pixelHeight)) / Double(min(pixelWidth, pixelHeight))
-        return abs(ratio - 19.5 / 9.0) < 0.03 || abs(ratio - 16.0 / 9.0) < 0.02
-    }
+    /// Screen recordings carry no dedicated Photos subtype, so this leans on Vision's own
+    /// judgement that the frame is an interface rather than a scene.
+    ///
+    /// The obvious alternative — matching the display's aspect ratio — was worse: it swept
+    /// up most 16:9 and 19.5:9 footage without location metadata, which is to say most
+    /// drone, action-camera and imported video, and quietly kept it out of memories.
+    var isScreenRecording: Bool { isVideo && isUtilityImage }
 
     var hasLocation: Bool { latitude != nil && longitude != nil }
 

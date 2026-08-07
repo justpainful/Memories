@@ -53,7 +53,7 @@ struct SearchView: View {
                     AssetGridView(
                         records: results,
                         emptyTitle: "Nothing matched",
-                        emptyDetail: "Try a year, a month, a place, or a kind like “videos”.",
+                        emptyDetail: "Try a date, a year, a place, or a kind like “videos”.",
                         emptySymbol: "magnifyingglass"
                     )
                 }

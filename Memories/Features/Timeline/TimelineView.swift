@@ -148,25 +148,45 @@ private struct YearScrubber: View {
     let years: [Int]
     let onSelect: (Int) -> Void
 
+    private let rowHeight: CGFloat = 20
+    private let rowSpacing: CGFloat = 2
+
     @State private var active: Int?
+    /// The year already handed over during the current touch, cleared when the finger lifts —
+    /// so a drag fires once per year crossed, yet re-tapping the same label still jumps back.
+    @State private var emitted: Int?
 
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: rowSpacing) {
             ForEach(years, id: \.self) { year in
                 Text(String(year).suffix(2))
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(active == year ? Palette.accent : Palette.textTertiary)
-                    .frame(width: 30, height: 20)
-                    .contentShape(.rect)
-                    .onTapGesture {
-                        active = year
-                        onSelect(year)
-                    }
+                    .frame(width: 30, height: rowHeight)
             }
         }
+        .contentShape(.rect)
+        // A zero minimum distance makes a tap arrive as the first drag update, so one gesture
+        // covers both without the labels racing the scrubber for the touch.
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { select(under: $0.location.y) }
+                .onEnded { _ in emitted = nil }
+        )
         .padding(.vertical, Space.s)
         .glassPanel(cornerRadius: 18)
         .accessibilityLabel("Jump to year")
+    }
+
+    private func select(under y: CGFloat) {
+        guard !years.isEmpty else { return }
+        let index = min(max(Int(y / (rowHeight + rowSpacing)), 0), years.count - 1)
+        let year = years[index]
+        guard year != emitted else { return }   // haptics and scrolling belong to changes only
+
+        emitted = year
+        active = year
+        onSelect(year)
     }
 }
 

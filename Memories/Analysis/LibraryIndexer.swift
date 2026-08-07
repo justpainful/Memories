@@ -185,10 +185,19 @@ actor LibraryIndexer {
         try? modelContext.delete(model: SimilarityCluster.self)
         var assignments: [String: (UUID?, Bool)] = [:]
 
+        var duplicateCounts: [String: Int] = [:]
+        var burstPositions: [String: Int] = [:]
+
         for group in SimilarityClustering.cluster(inputs) {
             guard group.count > 1 else {
                 if let only = group.first { assignments[only.identifier] = (nil, true) }
                 continue
+            }
+            // Position within the run matters: the later frames of a burst are usually the
+            // ones that were meant to be thrown away.
+            for (position, member) in group.sorted(by: { $0.date < $1.date }).enumerated() {
+                duplicateCounts[member.identifier] = group.count
+                burstPositions[member.identifier] = position
             }
             let best = SimilarityClustering.bestShot(in: group)
             let cluster = SimilarityCluster(
@@ -204,22 +213,51 @@ actor LibraryIndexer {
             }
         }
 
-        applySimilarityAssignments(assignments)
+        applySimilarityAssignments(assignments,
+                                   duplicateCounts: duplicateCounts,
+                                   burstPositions: burstPositions)
         modelContext.saveIfNeeded()
     }
 
-    private func applySimilarityAssignments(_ assignments: [String: (UUID?, Bool)]) {
+    private func applySimilarityAssignments(_ assignments: [String: (UUID?, Bool)],
+                                            duplicateCounts: [String: Int],
+                                            burstPositions: [String: Int]) {
         guard let records = try? modelContext.fetch(FetchDescriptor<AssetRecord>()) else { return }
         for record in records {
             let (cluster, isBest) = assignments[record.localIdentifier] ?? (nil, true)
             record.similarityClusterID = cluster
             record.isBestInSimilarityCluster = isBest
 
-            // Rescore with duplicate pressure now that group sizes are known.
-            if cluster != nil, !isBest {
-                record.memoryScore = max(0, record.memoryScore - 0.06)
-            }
+            // Duplicate pressure and burst position are only knowable once the groups exist,
+            // so the score is recomputed here from the stored measurements rather than being
+            // nudged by a flat penalty that ignores how big the run actually was.
+            record.memoryScore = QualityScorer.score(storedInputs(
+                for: record,
+                duplicateCount: duplicateCounts[record.localIdentifier] ?? 1,
+                burstPosition: burstPositions[record.localIdentifier] ?? 0
+            ))
         }
+    }
+
+    /// Rebuild the scorer's inputs from what was persisted during the pixel pass.
+    private func storedInputs(for record: AssetRecord,
+                              duplicateCount: Int,
+                              burstPosition: Int) -> QualityInputs {
+        QualityInputs(
+            aesthetics: record.aestheticsScore,
+            isUtility: record.isUtilityImage,
+            sharpness: record.sharpness,
+            faceCount: record.faceCount,
+            bestFaceQuality: record.faceQuality,
+            averageColor: record.averageColor,
+            pixelWidth: record.pixelWidth,
+            pixelHeight: record.pixelHeight,
+            isScreenshot: record.isScreenshot,
+            isVideo: record.isVideo,
+            isFavorite: record.isFavoriteInPhotos,
+            duplicateCount: duplicateCount,
+            burstPosition: burstPosition
+        )
     }
 
     /// Rebuild occasions from the shape of the shooting itself.

@@ -68,18 +68,31 @@ enum TimeWindow: Hashable, Identifiable, Sendable {
         }
     }
 
-    /// The Explore Time panel, in the order the user reads it.
+    /// The Explore Time panel, in the order the user reads it — now, then the same span in
+    /// earlier years widening from a day to a season, then round anniversaries, then the one
+    /// door out of the grid.
     static let exploreGroups: [[TimeWindow]] = [
         [.today, .thisWeek, .thisMonth, .thisYear],
-        [.onThisDay, .thisWeekInPreviousYears, .thisMonthInPreviousYears, .thisSeasonInPreviousYears],
+        [.onThisDay, .sameWeekendInPreviousYears, .thisWeekLastYear,
+         .thisWeekInPreviousYears, .thisMonthInPreviousYears, .thisSeasonInPreviousYears],
         [.yearsAgo(1), .yearsAgo(2), .yearsAgo(3), .yearsAgo(5), .yearsAgo(10)],
         [.surpriseMe],
     ]
 
-    /// The compact filter row above the feed.
+    /// The compact filter row above the feed. The recent spans come in pairs — this one and
+    /// the one before it — because that is how people ask for them.
     static let quickFilters: [TimeWindow] = [
-        .today, .thisWeek, .lastWeek, .onThisDay, .thisMonth, .thisYear, .lastYear, .surpriseMe,
+        .today, .yesterday, .thisWeek, .lastWeek, .onThisDay,
+        .thisMonth, .lastMonth, .thisYear, .lastYear, .surpriseMe,
     ]
+
+    /// One window per calendar month, across the whole library.
+    ///
+    /// Kept out of `exploreGroups` on purpose: twelve more rows would bury the four groups the
+    /// panel is built around, so this is offered wherever a month is being picked anyway.
+    static var everyMonthWindows: [TimeWindow] {
+        (1...12).map { Self.everyMonth($0) }
+    }
 
     // MARK: Resolution
 

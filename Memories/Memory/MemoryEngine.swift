@@ -11,6 +11,9 @@ actor MemoryEngine {
 
     private static let maxFeedLength = 9
 
+    /// The most that video, faces and screenshots together may move a candidate.
+    private static let compositionLimit = 0.12
+
     // MARK: Entry point
 
     func buildFeed(reference: Date = .now,
@@ -33,7 +36,8 @@ actor MemoryEngine {
         var scored = candidates.map { candidate -> MemoryCandidate in
             var copy = candidate
             copy.components.recentExposure = exposure(for: candidate.id, reference: reference)
-            copy.score = copy.components.total + preferenceAdjustment(for: candidate, preference)
+            copy.score = copy.components.total
+                + preferenceAdjustment(for: candidate, preference, options: options)
             return copy
         }
 
@@ -524,14 +528,51 @@ actor MemoryEngine {
     }
 
     private func preferenceAdjustment(for candidate: MemoryCandidate,
-                                      _ preference: UserPreference) -> Double {
+                                      _ preference: UserPreference,
+                                      options: CurationOptions) -> Double {
         var adjustment = preference.kindAffinity[candidate.kind.rawValue] ?? 0
         if candidate.placeName != nil { adjustment += preference.placeAffinity * 0.4 }
 
         let age = Date.now.timeIntervalSince(candidate.referenceDate) / 86_400
         adjustment += age > 730 ? preference.distantPastAffinity * 0.3
                                 : preference.recentPastAffinity * 0.3
-        return adjustment
+
+        return adjustment + compositionAdjustment(for: candidate, preference, options: options)
+    }
+
+    /// What has been learned about the contents of a memory rather than its shape: video,
+    /// faces, screenshots.
+    ///
+    /// Bounded three times over, because a habit should settle a tie between two good memories
+    /// and never lift a weak one over a strong one. Each affinity is already clamped to
+    /// ±`UserPreference.bound` where it is written; here it is scaled by how much of *this*
+    /// memory it actually describes, so a taste for video says nothing about a page of stills;
+    /// and the three together are capped, so no single habit can take the feed over. Against a
+    /// score that runs 0...1 the whole term is worth a tenth of a point at most.
+    private func compositionAdjustment(for candidate: MemoryCandidate,
+                                       _ preference: UserPreference,
+                                       options: CurationOptions) -> Double {
+        // Nothing has been taught yet, so there is nothing to weigh and no reason to pay for
+        // the fetch below.
+        guard preference.videoAffinity != 0
+                || preference.peopleAffinity != 0
+                || preference.screenshotAffinity != 0 else { return 0 }
+
+        let assets = records(for: candidate.assetIdentifiers, options: options)
+        guard !assets.isEmpty else { return 0 }
+        let count = Double(assets.count)
+
+        let videoShare = Double(assets.filter(\.isVideo).count) / count
+        let peopleShare = Double(assets.filter { $0.faceCount > 0 }.count) / count
+        // Zero unless Include Screenshots is on: curation drops them long before a candidate
+        // is built, which is exactly why hiding one has to keep counting for later.
+        let screenshotShare = Double(assets.filter(\.isScreenshot).count) / count
+
+        let total = preference.videoAffinity * videoShare * 0.3
+            + preference.peopleAffinity * peopleShare * 0.3
+            + preference.screenshotAffinity * screenshotShare * 0.3
+
+        return max(-Self.compositionLimit, min(Self.compositionLimit, total))
     }
 }
 

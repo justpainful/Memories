@@ -126,6 +126,8 @@ struct EventSheet: View {
     @State private var records: [AssetRecord] = []
     @State private var title = "Occasion"
     @State private var subtitle: String?
+    @State private var eventID: UUID?
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
@@ -149,6 +151,25 @@ struct EventSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    // A collection can hold a whole occasion, not only the loose frames
+                    // inside it — that is the difference between this and an album.
+                    Button { isSaving = true } label: {
+                        Image(systemName: "plus.rectangle.on.folder")
+                    }
+                    .disabled(eventID == nil)
+                    .accessibilityLabel("Keep this occasion")
+                }
+            }
+            .sheet(isPresented: $isSaving) {
+                if let eventID {
+                    AddToCollectionSheet(
+                        items: [CollectionItem(kind: .event, reference: eventID.uuidString)]
+                            + records.map { CollectionItem(kind: .asset, reference: $0.localIdentifier) },
+                        suggestedCover: records.first?.localIdentifier
+                    )
+                    .presentationDetents([.medium, .large])
+                }
             }
         }
         .task { load() }
@@ -158,6 +179,7 @@ struct EventSheet: View {
         let context = app.container.mainContext
         guard let record = LibraryQuery.records(for: [identifier], context: context).first,
               let eventID = record.eventClusterID else { return }
+        self.eventID = eventID
 
         var descriptor = FetchDescriptor<EventCluster>(predicate: #Predicate { $0.id == eventID })
         descriptor.fetchLimit = 1

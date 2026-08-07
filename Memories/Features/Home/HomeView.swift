@@ -203,10 +203,12 @@ struct HomeView: View {
                     .buttonStyle(.plain)
 
                 case .strip:
-                    StripSection(identifiers: candidate.assetIdentifiers)
+                    StripSection(identifiers: candidate.assetIdentifiers) { open(candidate) }
 
                 case .throughTheYears:
-                    YearStripSection(slices: model.yearSlices[candidate.id] ?? [])
+                    YearStripSection(slices: model.yearSlices[candidate.id] ?? []) { _ in
+                        open(candidate)
+                    }
                 }
             }
         }

@@ -16,6 +16,7 @@ struct TimeWindowResultsView: View {
     @State private var flat: [AssetRecord] = []
     @State private var viewing: String?
     @State private var isLoading = true
+    @State private var isSaving = false
 
     private let columns = [GridItem(.adaptive(minimum: 108), spacing: 4)]
 
@@ -64,6 +65,25 @@ struct TimeWindowResultsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                if case .dayAcrossYears = window {
+                    ToolbarItem(placement: .topBarLeading) {
+                        // A whole day is one of the things a collection can hold, so the day
+                        // view is where it has to be possible to keep one.
+                        Button { isSaving = true } label: {
+                            Image(systemName: "plus.rectangle.on.folder")
+                        }
+                        .disabled(allIdentifiers.isEmpty)
+                        .accessibilityLabel("Keep this day")
+                    }
+                }
+            }
+            .sheet(isPresented: $isSaving) {
+                AddToCollectionSheet(
+                    items: [CollectionItem(kind: .day, reference: window.title)]
+                        + allIdentifiers.map { CollectionItem(kind: .asset, reference: $0) },
+                    suggestedCover: allIdentifiers.first
+                )
+                .presentationDetents([.medium, .large])
             }
             .fullScreenCover(item: Binding(
                 get: { viewing.map(ViewerRequest.init(identifier:)) },

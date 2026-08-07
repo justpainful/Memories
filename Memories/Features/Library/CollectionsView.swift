@@ -150,6 +150,9 @@ struct CollectionDetailView: View {
 struct AddToCollectionSheet: View {
     let items: [CollectionItem]
     let suggestedCover: String?
+    /// Called with the collection's name once something is genuinely kept, so the caller can
+    /// record the save then rather than when the sheet merely opened.
+    var onSaved: (String) -> Void = { _ in }
 
     @Environment(\.app) private var app
     @Environment(\.dismiss) private var dismiss
@@ -196,6 +199,7 @@ struct AddToCollectionSheet: View {
         if collection.coverIdentifier == nil { collection.coverIdentifier = suggestedCover }
         app.container.mainContext.saveIfNeeded()
         Haptics.impact(.light)
+        onSaved(collection.name)
         dismiss()
     }
 

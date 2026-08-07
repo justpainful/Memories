@@ -35,13 +35,18 @@ struct CurationOptions: Sendable, Equatable {
     var includeScreenRecordings = false
     /// Images that arrived rather than were taken — saved pictures, receipts, documents.
     var includeDownloads = false
+    /// Assets whose originals live only in iCloud. They are kept out of *memories*, because
+    /// a memory whose pictures cannot be shown is not a memory — but they must still appear
+    /// when browsing, or a library on Optimize iPhone Storage would look mostly empty.
+    var includeCloudOnly = false
     /// Hidden means hidden from Memories, never deleted. Only the Hidden screen sets this.
     var includeHiddenFromMemories = false
 
     static let feed = CurationOptions()
     static let browsing = CurationOptions(mode: .pure, includeScreenshots: true,
                                           includeScreenRecordings: true,
-                                          includeDownloads: true)
+                                          includeDownloads: true,
+                                          includeCloudOnly: true)
 }
 
 // MARK: - Fetching
@@ -80,7 +85,7 @@ enum LibraryQuery {
 
     static func passes(_ record: AssetRecord, options: CurationOptions) -> Bool {
         if !options.includeHiddenFromMemories && record.excludedFromMemories { return false }
-        if !record.isLocallyAvailable { return false }
+        if !options.includeCloudOnly && !record.isLocallyAvailable { return false }
 
         switch options.media {
         case .all:

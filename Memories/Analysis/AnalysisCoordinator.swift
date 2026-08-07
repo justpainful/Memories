@@ -97,6 +97,8 @@ final class AnalysisCoordinator {
         await indexer.rebuildEvents()
         await setStage(.events, progress: 1)
 
+        await runMemories(indexer)
+
         await indexer.updateState {
             $0.lastIndexFinishedAt = .now
             $0.analysisVersion = currentAnalysisVersion
@@ -145,7 +147,7 @@ final class AnalysisCoordinator {
 
         let initialPending = await indexer.pendingPixelCount()
         guard initialPending > 0 else {
-            await setStage(.quality, progress: 1)
+            await setPixelProgress(1)
             return
         }
         var remaining = initialPending
@@ -183,13 +185,38 @@ final class AnalysisCoordinator {
             remaining = max(0, remaining - batch.count)
             pendingCount = remaining
             let done = Double(initialPending - remaining) / Double(initialPending)
-            await setStage(.quality, progress: done)
+            await setPixelProgress(done)
 
             try? await Task.sleep(for: allowance.pauseBetweenBatches)
         }
 
         pauseReason = nil
-        await setStage(.quality, progress: 1)
+        await setPixelProgress(1)
+    }
+
+    /// Feature prints and quality come out of one decode, so both stages advance on the same
+    /// number rather than leaving similarity reading zero forever. The status line names
+    /// quality, because that is the half still being worked on when a batch reports.
+    private func setPixelProgress(_ value: Double) async {
+        stage = .quality
+        progress = value
+        let indexer = LibraryIndexer(modelContainer: container)
+        await indexer.updateState {
+            $0.stageProgress[AnalysisStage.similarity.rawValue] = value
+            $0.stageProgress[AnalysisStage.quality.rawValue] = value
+            $0.currentStageRaw = AnalysisStage.quality.rawValue
+        }
+    }
+
+    /// Stage 6. The coordinator does not build the feed — `HomeModel` does, on demand, from
+    /// what the passes above leave behind. Building it here as well would make the user pay
+    /// for a whole second run to fill in a progress bar, so this stage reports the only thing
+    /// that is actually true at this point: every input the memory engine reads now exists.
+    /// An empty library stops short of 1, which is honest — there is nothing to remember yet.
+    private func runMemories(_ indexer: LibraryIndexer) async {
+        await setStage(.memories, progress: 0)
+        guard await indexer.totalCount() > 0 else { return }
+        await setStage(.memories, progress: 1)
     }
 
     private func setStage(_ stage: AnalysisStage, progress: Double) async {

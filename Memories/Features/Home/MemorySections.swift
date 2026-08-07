@@ -44,7 +44,9 @@ struct HeroMemoryCard: View {
             let width = proxy.size.width
             ZStack(alignment: .bottomLeading) {
                 if let cover = candidate.coverIdentifier {
-                    PhotoImageView(identifier: cover, targetSide: width, purpose: .display)
+                    // Browsing, not display: the feed must never quietly pull originals down
+                    // from iCloud just by being scrolled past.
+                    PhotoImageView(identifier: cover, targetSide: width, purpose: .browsing)
                 } else {
                     Palette.surfaceSunk
                 }
@@ -149,14 +151,20 @@ struct StripSection: View {
     let identifiers: [String]
     var cardWidth: CGFloat = 172
     var cardHeight: CGFloat = 216
+    /// The cards must be tappable in their own right. A horizontal run of photographs that
+    /// does nothing when touched reads as broken, whatever the header above it does.
+    var onSelect: () -> Void
 
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: Space.m) {
                 ForEach(identifiers.prefix(18), id: \.self) { identifier in
-                    PhotoImageView(identifier: identifier, targetSide: cardWidth * 2)
-                        .frame(width: cardWidth, height: cardHeight)
-                        .clipShape(.rect(cornerRadius: Radius.card))
+                    Button(action: onSelect) {
+                        PhotoImageView(identifier: identifier, targetSide: cardWidth * 2)
+                            .frame(width: cardWidth, height: cardHeight)
+                            .clipShape(.rect(cornerRadius: Radius.card))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, Space.gutter)
@@ -173,30 +181,34 @@ struct StripSection: View {
 struct YearStripSection: View {
     let slices: [YearSlice]
     var cardWidth: CGFloat = 148
+    var onSelect: (YearSlice) -> Void
 
     var body: some View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: Space.m) {
                 ForEach(slices) { slice in
-                    VStack(alignment: .leading, spacing: Space.s) {
-                        if let cover = slice.coverIdentifier {
-                            PhotoImageView(identifier: cover, targetSide: cardWidth * 2)
-                                .frame(width: cardWidth, height: cardWidth * 1.25)
-                                .clipShape(.rect(cornerRadius: Radius.card))
-                        } else {
-                            RoundedRectangle(cornerRadius: Radius.card)
-                                .fill(Palette.surfaceSunk)
-                                .frame(width: cardWidth, height: cardWidth * 1.25)
-                        }
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(String(slice.year))
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Palette.textPrimary)
-                            Text("\(slice.count) \(slice.count == 1 ? "moment" : "moments")")
-                                .font(Typo.meta)
-                                .foregroundStyle(Palette.textTertiary)
+                    Button { onSelect(slice) } label: {
+                        VStack(alignment: .leading, spacing: Space.s) {
+                            if let cover = slice.coverIdentifier {
+                                PhotoImageView(identifier: cover, targetSide: cardWidth * 2)
+                                    .frame(width: cardWidth, height: cardWidth * 1.25)
+                                    .clipShape(.rect(cornerRadius: Radius.card))
+                            } else {
+                                RoundedRectangle(cornerRadius: Radius.card)
+                                    .fill(Palette.surfaceSunk)
+                                    .frame(width: cardWidth, height: cardWidth * 1.25)
+                            }
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(String(slice.year))
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(Palette.textPrimary)
+                                Text("\(slice.count) \(slice.count == 1 ? "moment" : "moments")")
+                                    .font(Typo.meta)
+                                    .foregroundStyle(Palette.textTertiary)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, Space.gutter)

@@ -92,10 +92,15 @@ final class PhotoImageLoader {
                     purpose: .browsing)
     }
 
-    func livePhoto(for asset: PHAsset, targetSize: CGSize) async -> PHLivePhoto? {
+    /// Defaults to `.display` because the only caller is the full-screen viewer, which the
+    /// user reached by deliberately opening a photograph. The parameter exists so that
+    /// policy is stated rather than assumed.
+    func livePhoto(for asset: PHAsset,
+                   targetSize: CGSize,
+                   purpose: ImagePurpose = .display) async -> PHLivePhoto? {
         let options = PHLivePhotoRequestOptions()
         options.deliveryMode = .highQualityFormat
-        options.isNetworkAccessAllowed = true
+        options.isNetworkAccessAllowed = purpose.allowsNetwork
 
         return await withCheckedContinuation { continuation in
             var resumed = false
@@ -111,10 +116,10 @@ final class PhotoImageLoader {
         }
     }
 
-    func playerItem(for asset: PHAsset) async -> AVPlayerItem? {
+    func playerItem(for asset: PHAsset, purpose: ImagePurpose = .display) async -> AVPlayerItem? {
         let options = PHVideoRequestOptions()
         options.deliveryMode = .automatic
-        options.isNetworkAccessAllowed = true
+        options.isNetworkAccessAllowed = purpose.allowsNetwork
 
         return await withCheckedContinuation { continuation in
             manager.requestPlayerItem(forVideo: asset, options: options) { item, _ in

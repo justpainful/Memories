@@ -62,6 +62,7 @@ struct PrivacyView: View {
 struct StorageView: View {
     @Environment(\.app) private var app
     @State private var databaseBytes: Int64 = 0
+    @State private var analysisBytes: Int64 = 0
     @State private var recordCount = 0
     @State private var confirmClear = false
 
@@ -69,9 +70,19 @@ struct StorageView: View {
         List {
             Section {
                 LabeledContent("Database", value: format(databaseBytes))
+                LabeledContent("Analysis Cache", value: format(analysisBytes))
+                LabeledContent("Thumbnails", value: "Managed by Photos")
+                // The store is the only thing Memories writes, so the total is that file
+                // rather than the sum of the lines above it.
+                LabeledContent("Total", value: format(databaseBytes))
+            } footer: {
+                Text("The analysis cache is the feature prints Vision produced. It is kept inside the database rather than beside it, so it is part of that figure and not added to it. Thumbnails belong to Photos and are never copied here, which is why Memories stays small even for very large libraries.")
+            }
+
+            Section {
                 LabeledContent("Rows", value: "\(recordCount)")
             } footer: {
-                Text("Thumbnails are managed by Photos, not duplicated here, so Memories stays small even for very large libraries.")
+                Text("One row for each item in your library: identifiers and computed details, never a second copy of the photo.")
             }
 
             Section {
@@ -96,12 +107,21 @@ struct StorageView: View {
     }
 
     private func load() {
-        recordCount = LibraryQuery.allRecords(context: app.container.mainContext).count
+        let records = LibraryQuery.allRecords(context: app.container.mainContext)
+        recordCount = records.count
+        analysisBytes = Self.featurePrintSize(records)
         databaseBytes = Self.storeSize()
     }
 
     private func format(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    /// Feature prints are the only derived data large enough to be worth a line of its own.
+    /// The scores and group assignments beside them are a handful of numbers per row, and they
+    /// sit in the same store file, so they are already counted in the database figure.
+    private static func featurePrintSize(_ records: [AssetRecord]) -> Int64 {
+        records.reduce(Int64(0)) { $0 + Int64($1.featurePrint?.count ?? 0) }
     }
 
     /// SwiftData writes a SQLite store plus its journal files into Application Support.

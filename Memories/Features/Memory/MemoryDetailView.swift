@@ -11,6 +11,7 @@ struct MemoryDetailView: View {
     @State private var records: [AssetRecord] = []
     @State private var viewerStart: String?
     @State private var isSaving = false
+    @State private var note: String?
 
     private let columns = [GridItem(.adaptive(minimum: 108), spacing: 4)]
 
@@ -68,12 +69,14 @@ struct MemoryDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    // The save is recorded when the collection is actually chosen, not when
+                    // the sheet opens — cancelling is not saving.
                     Button("Save to a collection", systemImage: "plus.rectangle.on.folder") {
-                        app.feedback.recordSaved(candidate)
                         isSaving = true
                     }
                     Button("Show me fewer like this", systemImage: "hand.thumbsdown") {
                         app.feedback.recordDismissed(candidate)
+                        note = "This kind will show up less often"
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -94,8 +97,31 @@ struct MemoryDetailView: View {
                 items: [CollectionItem(kind: .memory, reference: candidate.id)]
                     + records.map { CollectionItem(kind: .asset, reference: $0.localIdentifier) },
                 suggestedCover: candidate.coverIdentifier
-            )
+            ) { name in
+                app.feedback.recordSaved(candidate)
+                note = "Kept in \(name)"
+            }
             .presentationDetents([.medium, .large])
+        }
+        .overlay(alignment: .bottom) {
+            if let note {
+                Text(note)
+                    .font(Typo.control)
+                    .foregroundStyle(Palette.textPrimary)
+                    .padding(.horizontal, Space.l)
+                    .padding(.vertical, Space.m)
+                    .glassPanel(cornerRadius: 20)
+                    .padding(.bottom, 150)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+        }
+        .animation(.smooth(duration: 0.25), value: note)
+        .onChange(of: note) { _, value in
+            guard value != nil else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(1.6))
+                note = nil
+            }
         }
         .task {
             mode = app.settings.smartCuration ? .smart : .pure

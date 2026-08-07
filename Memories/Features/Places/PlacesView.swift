@@ -3,6 +3,19 @@ import MapKit
 import SwiftData
 import SwiftUI
 
+/// One place in one year, gathered from every occasion the app recorded there.
+///
+/// The rows under the map are the second way into a place, for when you remember the year
+/// but not where the pin sits — so they carry the frames themselves, not just a tally.
+private struct PlaceYear: Identifiable {
+    let place: String
+    let year: Int
+    let assetIdentifiers: [String]
+
+    var id: String { "\(place)·\(year)" }
+    var count: Int { assetIdentifiers.count }
+}
+
 /// Where your photographs were taken, from the coordinates your camera already saved.
 ///
 /// Not a Google Photos clone: the map is a way in, and what it leads to is the same thing
@@ -13,6 +26,7 @@ struct PlacesView: View {
     @State private var events: [EventCluster] = []
     @State private var camera: MapCameraPosition = .automatic
     @State private var selection: EventCluster?
+    @State private var openYear: PlaceYear?
 
     var body: some View {
         Group {
@@ -55,16 +69,18 @@ struct PlacesView: View {
                     List {
                         ForEach(groupedByPlace, id: \.name) { group in
                             Section(group.name) {
-                                ForEach(group.years, id: \.year) { entry in
-                                    HStack {
-                                        Text(String(entry.year))
-                                            .font(Typo.label)
-                                            .foregroundStyle(Palette.textPrimary)
-                                        Spacer()
-                                        Text("\(entry.count)")
-                                            .font(Typo.meta)
-                                            .foregroundStyle(Palette.textTertiary)
-                                            .monospacedDigit()
+                                ForEach(group.years) { entry in
+                                    Button { openYear = entry } label: {
+                                        HStack {
+                                            Text(String(entry.year))
+                                                .font(Typo.label)
+                                                .foregroundStyle(Palette.textPrimary)
+                                            Spacer()
+                                            Text("\(entry.count)")
+                                                .font(Typo.meta)
+                                                .foregroundStyle(Palette.textTertiary)
+                                                .monospacedDigit()
+                                        }
                                     }
                                 }
                             }
@@ -82,10 +98,13 @@ struct PlacesView: View {
         .sheet(item: $selection) { event in
             EventPlaceSheet(event: event)
         }
+        .sheet(item: $openYear) { entry in
+            PlaceYearSheet(entry: entry)
+        }
         .task { await load() }
     }
 
-    private var groupedByPlace: [(name: String, years: [(year: Int, count: Int)])] {
+    private var groupedByPlace: [(name: String, years: [PlaceYear])] {
         let calendar = Calendar.current
         let named = events.filter { $0.placeName != nil }
         let byPlace = Dictionary(grouping: named) { $0.placeName ?? "" }
@@ -93,7 +112,10 @@ struct PlacesView: View {
         return byPlace.map { name, group in
             let byYear = Dictionary(grouping: group) { calendar.component(.year, from: $0.startDate) }
             let years = byYear
-                .map { year, events in (year: year, count: events.reduce(0) { $0 + $1.assetCount }) }
+                .map { year, occasions in
+                    PlaceYear(place: name, year: year,
+                              assetIdentifiers: occasions.flatMap(\.assetIdentifiers))
+                }
                 .sorted { $0.year > $1.year }
             return (name: name, years: years)
         }
@@ -156,6 +178,34 @@ private struct EventPlaceSheet: View {
         }
         .task {
             records = LibraryQuery.records(for: event.assetIdentifiers,
+                                           context: app.container.mainContext)
+        }
+    }
+}
+
+/// Everything from one place in one year, opened from the list under the map.
+private struct PlaceYearSheet: View {
+    let entry: PlaceYear
+
+    @Environment(\.app) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var records: [AssetRecord] = []
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                AssetGridView(records: records, emptyTitle: "Nothing left here")
+                    .padding(.bottom, Space.section)
+            }
+            .background(Palette.canvas)
+            .navigationTitle("\(entry.place) · \(String(entry.year))")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+        .task {
+            records = LibraryQuery.records(for: entry.assetIdentifiers,
                                            context: app.container.mainContext)
         }
     }

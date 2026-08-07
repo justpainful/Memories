@@ -23,6 +23,7 @@ struct PhotoViewerView: View {
     @State private var similarFor: String?
     @State private var eventFor: String?
     @State private var dayWindow: TimeWindow?
+    @State private var isSaving = false
     @State private var confirmationText: String?
 
     init(identifiers: [String], startAt: String) {
@@ -39,7 +40,8 @@ struct PhotoViewerView: View {
                 ForEach(identifiers, id: \.self) { identifier in
                     ViewerPage(identifier: identifier,
                                isCurrent: identifier == current,
-                               showControls: showControls)
+                               showControls: showControls,
+                               onSurfaceTap: { toggleControls() })
                         .tag(identifier)
                 }
             }
@@ -99,6 +101,15 @@ struct PhotoViewerView: View {
         .sheet(item: $dayWindow) { window in
             TimeWindowResultsView(window: window)
         }
+        .sheet(isPresented: $isSaving) {
+            AddToCollectionSheet(
+                items: [CollectionItem(kind: .asset, reference: current)],
+                suggestedCover: current
+            ) { name in
+                confirm("Kept in \(name)")
+            }
+            .presentationDetents([.medium, .large])
+        }
     }
 
     // MARK: Controls
@@ -132,8 +143,11 @@ struct PhotoViewerView: View {
                 }
 
                 Menu {
-                    Button("Show in Photos", systemImage: "photo.on.rectangle.angled") { openPhotos() }
+                    Button("Open in Photos", systemImage: "photo.on.rectangle.angled") { openPhotos() }
                     Button("Share", systemImage: "square.and.arrow.up") { Task { await prepareShare() } }
+                    Button("Save to a collection", systemImage: "plus.rectangle.on.folder") {
+                        isSaving = true
+                    }
                     Divider()
                     Button("Show Similar Photos", systemImage: "square.stack.3d.down.right") {
                         similarFor = current
@@ -261,6 +275,7 @@ private struct ViewerPage: View {
     let identifier: String
     let isCurrent: Bool
     let showControls: Bool
+    let onSurfaceTap: () -> Void
 
     @Environment(\.app) private var app
     @State private var livePhoto: PHLivePhoto?
@@ -274,7 +289,8 @@ private struct ViewerPage: View {
                 if let player {
                     MemoryVideoPlayer(player: player,
                                       showControls: showControls,
-                                      autoplay: app.settings.autoplayVideos && isCurrent)
+                                      autoplay: app.settings.autoplayVideos && isCurrent,
+                                      onSurfaceTap: onSurfaceTap)
                 } else if let livePhoto {
                     LivePhotoView(livePhoto: livePhoto, isPlaying: isCurrent && app.settings.playLivePhotos)
                 } else {

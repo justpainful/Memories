@@ -11,6 +11,10 @@ struct MemoryVideoPlayer: View {
     let player: AVPlayer
     let showControls: Bool
     var autoplay: Bool
+    /// Tapping the picture belongs to the viewer, not to this player. If it toggled playback
+    /// instead, then once the controls auto-hid there would be no way to bring back Back,
+    /// Love or the ••• menu, and a full-screen cover has no interactive dismiss to escape by.
+    var onSurfaceTap: () -> Void
 
     @State private var isPlaying = false
     @State private var duration: Double = 0
@@ -25,7 +29,7 @@ struct MemoryVideoPlayer: View {
             PlayerSurface(player: player)
                 .ignoresSafeArea()
                 .contentShape(.rect)
-                .onTapGesture { togglePlayback() }
+                .onTapGesture { onSurfaceTap() }
 
             if showControls {
                 VStack {
