@@ -12,6 +12,11 @@ struct PhotoImageView: View {
     var purpose: ImagePurpose = .browsing
     var contentMode: ContentMode = .fill
 
+    /// The scale of the display this view is actually on. `UIScreen.main` is the wrong
+    /// answer to that question on modern iOS — it names one screen in a world where an app
+    /// can be on several — and Apple deprecated it for exactly that reason.
+    @Environment(\.displayScale) private var displayScale
+
     @State private var image: UIImage?
     @State private var isUnavailable = false
 
@@ -40,7 +45,7 @@ struct PhotoImageView: View {
     }
 
     private func load(side: CGFloat) async {
-        let requested = max(side, targetSide) * UIScreen.main.scale
+        let requested = max(side, targetSide) * displayScale
         let size = CGSize(width: requested, height: requested)
 
         // Ask the cache before clearing anything. This runs again every time a tile scrolls

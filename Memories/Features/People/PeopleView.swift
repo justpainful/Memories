@@ -250,6 +250,11 @@ struct FaceThumbnail: View {
     let person: PersonRecord
     var side: CGFloat = 104
 
+    /// The scale of the display this is actually on, rather than `UIScreen.main`'s answer for
+    /// one particular screen. A face is a fraction of its frame, so getting this wrong is the
+    /// difference between a crisp crop and a soft one.
+    @Environment(\.displayScale) private var displayScale
+
     @State private var image: UIImage?
 
     var body: some View {
@@ -279,7 +284,7 @@ struct FaceThumbnail: View {
 
         // The face is a fraction of the frame, so the frame has to be fetched several times
         // larger than the tile or the crop comes back soft.
-        let requested = side * UIScreen.main.scale * 3
+        let requested = side * displayScale * 3
         guard let full = await PhotoImageLoader.shared.image(
             forIdentifier: identifier,
             targetSize: CGSize(width: requested, height: requested),
@@ -290,7 +295,7 @@ struct FaceThumbnail: View {
                          y: person.coverBoundingY,
                          width: person.coverBoundingWidth,
                          height: person.coverBoundingHeight)
-        image = FaceCrop.square(from: full, box: box, side: side * UIScreen.main.scale)
+        image = FaceCrop.square(from: full, box: box, side: side * displayScale)
     }
 }
 

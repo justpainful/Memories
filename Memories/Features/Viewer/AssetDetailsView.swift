@@ -259,6 +259,7 @@ struct EventSheet: View {
     @State private var subtitle: String?
     @State private var eventID: UUID?
     @State private var isSaving = false
+    @State private var selection = PhotoSelection()
 
     var body: some View {
         NavigationStack {
@@ -273,10 +274,15 @@ struct EventSheet: View {
                     }
                     AssetGridView(records: records,
                                   emptyTitle: "This occasion is empty",
-                                  emptySymbol: "calendar.badge.clock")
+                                  emptySymbol: "calendar.badge.clock",
+                                  selection: selection)
                 }
                 .padding(.bottom, Space.section)
             }
+            // The bar belongs to the screen, not to the grid. Declared inside the grid it is
+            // laid out after the last photograph, so reaching Love or Save meant scrolling to
+            // the end of the occasion first.
+            .selectionActionBar(selection)
             .background(Palette.canvas)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)

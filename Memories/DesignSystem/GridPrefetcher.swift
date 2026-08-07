@@ -37,7 +37,10 @@ final class GridPrefetcher {
         guard lower < upper else { return }
 
         let window = Array(identifiers[lower..<upper])
-        let requested = side * UIScreen.main.scale
+        // `UITraitCollection.current` rather than `UIScreen.main`: this is not a view and has
+        // no environment to read, and `UIScreen.main` names one screen in a world where an app
+        // can be on several, which is why Apple deprecated it.
+        let requested = side * UITraitCollection.current.displayScale
         let size = CGSize(width: requested, height: requested)
 
         // Only the newest window matters; a request from two screens ago is wasted decoding.
