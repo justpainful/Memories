@@ -469,9 +469,11 @@ private struct KeptDayScreen: View {
     /// thread stops the push animation that is still running.
     private func load() async {
         let query = TimeWindowQuery(modelContainer: app.container)
-        let identifiers = await query.flat(window: window,
-                                           options: app.settings.curationOptions)
-        records = LibraryQuery.records(for: identifiers, context: app.container.mainContext)
+        // `results` is the actor's one entry point on purpose — it carries the identifiers and
+        // the facts each tile speaks aloud back in a single crossing. A day in a collection is
+        // never a through-the-years window, so `flat` is the whole of the answer here.
+        let found = await query.results(window: window, options: app.settings.curationOptions)
+        records = LibraryQuery.records(for: found.flat, context: app.container.mainContext)
         isLoading = false
     }
 }

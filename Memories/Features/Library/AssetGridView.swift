@@ -91,68 +91,7 @@ struct AssetGridView: View {
             } else {
                 PhotoGrid {
                     ForEach(Array(records.enumerated()), id: \.element.localIdentifier) { index, record in
-                        Button {
-                            // While selecting, a tap picks rather than opens — the same tile,
-                            // two meanings, which is how Photos does it too.
-                            if picking.isActive {
-                                picking.toggle(record.localIdentifier)
-                            } else {
-                                viewing = record.localIdentifier
-                            }
-                        } label: {
-                            tile(record)
-                                .selectionOverlay(
-                                    isSelecting: picking.isActive,
-                                    isSelected: picking.contains(record.localIdentifier),
-                                    cornerRadius: 6,
-                                    tileSide: tileSide
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        // A photograph draws nothing a screen reader can name, so without this
-                        // the library is fifteen thousand announcements of the word "Button".
-                        // The label is built from the row the app already holds, so it says
-                        // what the picture is and when it was taken — which is how anyone
-                        // tells one photograph from another.
-                        .accessibilityLabel(label(for: record))
-                        // The overlay's own trait cannot reach out here: traits set inside a
-                        // button's label do not merge into the button. Stated again on the
-                        // element VoiceOver actually focuses.
-                        .accessibilityAddTraits(
-                            picking.isActive && picking.contains(record.localIdentifier)
-                                ? [.isSelected] : []
-                        )
-                        // The context menu below is the only way to love, hide or share from a
-                        // grid. A hold does surface it under VoiceOver, but nothing tells the
-                        // reader a hold does anything — the rotor is where they look, and
-                        // without these there is nothing in it.
-                        .accessibilityActions {
-                            if !picking.isActive { rotorActions(for: record) }
-                        }
-                        // Outside the button rather than inside its label. A control nested in
-                        // a button's label never receives the touch — the button around it
-                        // swallows every tap — so Restore on the Hidden screen looked like a
-                        // button and behaved like part of the photograph.
-                        .overlay(alignment: .topTrailing) {
-                            if let trailingAction, !picking.isActive {
-                                trailingAction(record)
-                            }
-                        }
-                        // Tell Photos what is coming before it is asked for. Without this every
-                        // tile is a cold request issued at the moment it appears.
-                        .onAppear {
-                            prefetcher.tileAppeared(at: index,
-                                                    identifiers: identifiers,
-                                                    side: tileSide)
-                        }
-                        // Holding a tile to reach its menu would fight picking it, so the menu
-                        // steps aside for as long as selection is running.
-                        .contextMenu(menuItems: {
-                            if !picking.isActive { actions(for: record) }
-                        }, preview: {
-                            preview(record)
-                        })
-                        .matchedTransitionSource(id: record.localIdentifier, in: opening)
+                        cell(record, at: index, within: identifiers)
                     }
                 }
             }
@@ -251,6 +190,80 @@ struct AssetGridView: View {
         }
         // Photos should not be left decoding ahead for a grid that is no longer on screen.
         .onDisappear { prefetcher.stop() }
+    }
+
+    /// One photograph in the grid.
+    ///
+    /// Lifted out of `body`, and not for tidiness. A `Button` carrying a label, a selection
+    /// overlay, four accessibility modifiers, a rotor action set, a corner overlay, an
+    /// appearance hook, a context menu with its own preview and a transition source is one
+    /// expression deep enough that the type checker gives up on the whole screen — which is
+    /// exactly what it did, by name, in CI. A function signature is somewhere for it to stop
+    /// and be certain.
+    @ViewBuilder
+    private func cell(_ record: AssetRecord, at index: Int, within identifiers: [String]) -> some View {
+        Button {
+            // While selecting, a tap picks rather than opens — the same tile,
+            // two meanings, which is how Photos does it too.
+            if picking.isActive {
+                picking.toggle(record.localIdentifier)
+            } else {
+                viewing = record.localIdentifier
+            }
+        } label: {
+            tile(record)
+                .selectionOverlay(
+                    isSelecting: picking.isActive,
+                    isSelected: picking.contains(record.localIdentifier),
+                    cornerRadius: 6,
+                    tileSide: tileSide
+                )
+        }
+        .buttonStyle(.plain)
+        // A photograph draws nothing a screen reader can name, so without this
+        // the library is fifteen thousand announcements of the word "Button".
+        // The label is built from the row the app already holds, so it says
+        // what the picture is and when it was taken — which is how anyone
+        // tells one photograph from another.
+        .accessibilityLabel(label(for: record))
+        // The overlay's own trait cannot reach out here: traits set inside a
+        // button's label do not merge into the button. Stated again on the
+        // element VoiceOver actually focuses.
+        .accessibilityAddTraits(
+            picking.isActive && picking.contains(record.localIdentifier)
+                ? [.isSelected] : []
+        )
+        // The context menu below is the only way to love, hide or share from a
+        // grid. A hold does surface it under VoiceOver, but nothing tells the
+        // reader a hold does anything — the rotor is where they look, and
+        // without these there is nothing in it.
+        .accessibilityActions {
+            if !picking.isActive { rotorActions(for: record) }
+        }
+        // Outside the button rather than inside its label. A control nested in
+        // a button's label never receives the touch — the button around it
+        // swallows every tap — so Restore on the Hidden screen looked like a
+        // button and behaved like part of the photograph.
+        .overlay(alignment: .topTrailing) {
+            if let trailingAction, !picking.isActive {
+                trailingAction(record)
+            }
+        }
+        // Tell Photos what is coming before it is asked for. Without this every
+        // tile is a cold request issued at the moment it appears.
+        .onAppear {
+            prefetcher.tileAppeared(at: index,
+                                    identifiers: identifiers,
+                                    side: tileSide)
+        }
+        // Holding a tile to reach its menu would fight picking it, so the menu
+        // steps aside for as long as selection is running.
+        .contextMenu(menuItems: {
+            if !picking.isActive { actions(for: record) }
+        }, preview: {
+            preview(record)
+        })
+        .matchedTransitionSource(id: record.localIdentifier, in: opening)
     }
 
     private func tile(_ record: AssetRecord) -> some View {
