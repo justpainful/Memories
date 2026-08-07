@@ -161,13 +161,39 @@ final class MemoriesUITests: XCTestCase {
             settle()
         }
 
-        for _ in 0..<4 {
-            let back = app.navigationBars.buttons.element(boundBy: 0)
-            guard back.exists, back.isHittable else { break }
-            back.tap()
-            settle()
+        for _ in 0..<5 {
+            guard popOnce() else { break }
         }
         dismissAnySheet()
+    }
+
+    /// Pop one pushed screen, and say whether there was one.
+    ///
+    /// It must be a *back* button, asked for by name. Reaching for the navigation bar's first
+    /// button instead — which is the recipe this tour used to follow — works only on a screen
+    /// that has one. On a tab root there is none, so the first button is whatever the toolbar
+    /// puts there, and on this app's home screen that is the Settings gear. The tour tapped it,
+    /// walked into Settings, and photographed Settings for the remaining nine steps while
+    /// reporting nothing wrong.
+    private func popOnce() -> Bool {
+        // Hittable, because all three tab stacks stay mounted behind one another: an
+        // unselected tab's back button still exists and tapping it would quietly rearrange a
+        // screen nobody is looking at.
+        let back = app.navigationBars.buttons["BackButton"].firstMatch
+        if back.exists, back.isHittable {
+            back.tap()
+            settle()
+            return true
+        }
+        guard app.navigationBars.buttons["BackButton"].firstMatch.exists else { return false }
+
+        // The button is there but not reachable — a glass toolbar mid-animation, usually.
+        // The interactive pop gesture does not care.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+            .press(forDuration: 0.05,
+                   thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+        settle()
+        return true
     }
 
     /// A sheet left open swallows every later tap, and the rest of the tour then
