@@ -2,12 +2,10 @@ import SwiftUI
 
 /// The thumbnail scrubber along the bottom of the full-screen viewer.
 ///
-/// Meant to be added to `PhotoViewerView` in `Memories/Features/Viewer/PhotoViewerView.swift`:
-/// inside the `if showControls` overlay, directly above `bottomCluster`, as
-/// `ViewerFilmstrip(identifiers: identifiers, current: $current)`. It fades in and out with
-/// the rest of the controls and needs no other wiring — the binding it shares with the pager
-/// is the whole contract, so dragging the strip turns the page and turning the page moves the
-/// strip.
+/// It sits in the viewer's control column directly above the button cluster, sharing that slot
+/// with the video transport — one or the other, never both. The binding it shares with the
+/// pager is the whole contract: dragging the strip turns the page and turning the page moves
+/// the strip.
 ///
 /// It is deliberately lazy. A memory can hold hundreds of photographs, and a strip that
 /// realised all of them would ask Photos for hundreds of thumbnails the moment the viewer
@@ -21,8 +19,11 @@ struct ViewerFilmstrip: View {
     /// each side only assigns when the two have actually diverged.
     @State private var centred: String?
 
-    private let selectedSide: CGFloat = 52
-    private let restingSide: CGFloat = 36
+    /// One cell, whether or not it holds the selected photograph, and comfortably past the
+    /// smallest target Apple will vouch for. This is a scrubber for a set that can run to
+    /// hundreds, so it is the thing in the viewer most often aimed at and it was the smallest.
+    private let cellSide: CGFloat = 56
+    private let restingSide: CGFloat = 42
 
     init(identifiers: [String], current: Binding<String>) {
         self.identifiers = identifiers
@@ -53,15 +54,16 @@ struct ViewerFilmstrip: View {
             // Without this the first and last photographs could never reach the middle, so
             // the strip would refuse to select either end of the set.
             .contentMargins(.horizontal,
-                            max(0, (proxy.size.width - selectedSide) / 2),
+                            max(0, (proxy.size.width - cellSide) / 2),
                             for: .scrollContent)
         }
-        .frame(height: selectedSide)
+        .frame(height: cellSide)
         .padding(.vertical, Space.s)
-        // The strip is a control, not content, and it floats over a photograph the user is
-        // deliberately looking at — so clear, which lets the picture stay the brightest thing
-        // on screen instead of putting a frosted band across the bottom of it.
-        .glassPanel(cornerRadius: Radius.hero, tone: .clear)
+        // Flat, not glass. The strip is a wide panel with a long straight top edge, and over
+        // the viewer's black backdrop Liquid Glass has nothing to refract there — all that
+        // survives is the specular highlight along that edge, which draws as a hard white line
+        // across a dark slab and reads as a rendering fault. See `ViewerSurface`.
+        .background(ViewerSurface.fill, in: .rect(cornerRadius: Radius.hero))
         .padding(.horizontal, Space.gutter)
         .animation(.smooth(duration: 0.22), value: current)
         .onChange(of: centred) { _, scrolled in
@@ -78,7 +80,7 @@ struct ViewerFilmstrip: View {
 
     private func thumbnail(_ identifier: String) -> some View {
         let isCurrent = identifier == current
-        let side = isCurrent ? selectedSide : restingSide
+        let side = isCurrent ? cellSide : restingSide
 
         return Button {
             guard !isCurrent else { return }
@@ -97,6 +99,13 @@ struct ViewerFilmstrip: View {
                             .fill(Palette.photoScrim)
                     }
                 }
+                // The cell is the same size whichever photograph is selected, and the picture
+                // inside it grows rather than the cell. Letting the cell grow re-flowed the
+                // whole row at every step of a scrub, so the thumbnails slid out from under the
+                // finger that was choosing between them. It is also what makes the target a
+                // full cell wide instead of only as wide as the small picture drawn in it.
+                .frame(width: cellSide, height: cellSide)
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label(for: identifier))

@@ -1,13 +1,20 @@
 import AVKit
+import Combine
 import PhotosUI
 import SwiftData
 import SwiftUI
 
 /// Full screen. The photograph is the whole screen and the only thing on it.
 ///
-/// Controls are one floating glass cluster that gets out of the way after a moment and comes
-/// back on a tap. Nothing is layered over the image permanently, and there is no story
-/// progress bar counting down at the user.
+/// Controls are one floating glass cluster that a tap puts away and a tap brings back. They do
+/// not leave on their own after a couple of seconds any more: chrome that disappears while a
+/// thumb is already travelling towards it turns a deliberate tap on the heart into a tap on
+/// the photograph, and from the outside that is indistinguishable from the app missing the
+/// touch. Photos has never hidden its chrome on a timer, and neither does this.
+///
+/// Exactly one gesture answers a finger on the picture, and the page under it owns that
+/// gesture — the single tap and the double tap are declared side by side rather than two
+/// levels apart. Vertical drags belong to the viewer: up for the details panel, down to leave.
 ///
 /// What is known *about* the photograph stays out of sight until it is asked for: swipe up
 /// on the picture, or ••• → Details. It arrives as a sheet with detents, so a short pull
@@ -21,7 +28,6 @@ struct PhotoViewerView: View {
 
     @State private var current: String
     @State private var showControls = true
-    @State private var hideTask: Task<Void, Never>?
     @State private var showDetails = false
     @State private var shareImage: UIImage?
     @State private var similarFor: String?
@@ -30,6 +36,26 @@ struct PhotoViewerView: View {
     @State private var isSaving = false
     @State private var confirmationText: String?
     @State private var zoom = ViewerZoom()
+
+    /// The row for whatever is on screen, read once per photograph instead of on every pass of
+    /// this body.
+    ///
+    /// A pinch or a pan rewrites `zoom` many times a second and each of those runs this body
+    /// again. Going back to SwiftData for the same row sixty times a second is work a gesture
+    /// cannot afford, and a gesture that drops frames is indistinguishable from one that is
+    /// not tracking the finger.
+    @State private var record: AssetRecord?
+
+    /// The player for the video on screen, and for nothing else.
+    ///
+    /// It is held here rather than inside the page for two reasons. Only the photograph the
+    /// user is actually looking at ever has one, so paging through a memory full of clips can
+    /// never leave a row of players alive behind it. And the transport belongs in the viewer's
+    /// own column of controls, beside Back and the heart, rather than being a second floating
+    /// stack inside the page trying to guess where the first one ends.
+    @State private var player: AVPlayer?
+    @State private var isPlaying = false
+    @State private var isMuted = false
 
     /// What the heart is showing while the tap is still in flight, and `nil` whenever it is
     /// simply showing what is stored.
@@ -40,6 +66,10 @@ struct PhotoViewerView: View {
     /// from the stored value is also what stops the picture arriving with the previous
     /// photograph's heart still lit.
     @State private var lovedOverride: Bool?
+
+    /// The band above the button cluster, tall enough for the filmstrip — 56 for a cell and 8
+    /// of air either side of it — and held at that whether the transport or the strip is in it.
+    private let slotHeight: CGFloat = 72
 
     init(identifiers: [String], startAt: String) {
         self.identifiers = identifiers
@@ -55,7 +85,7 @@ struct PhotoViewerView: View {
                 ForEach(identifiers, id: \.self) { identifier in
                     ViewerPage(identifier: identifier,
                                isCurrent: identifier == current,
-                               showControls: showControls,
+                               player: identifier == current ? player : nil,
                                zoom: identifier == current ? $zoom : .constant(ViewerZoom()),
                                onSurfaceTap: { toggleControls() })
                         .tag(identifier)
@@ -63,17 +93,18 @@ struct PhotoViewerView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
-            .onTapGesture { toggleControls() }
+            // No tap gesture here. There used to be one, and it was the single tap that
+            // toggles the controls — two levels above the double tap that zooms. Nothing
+            // arbitrates between a gesture on a container and a gesture inside it, so a double
+            // tap toggled the chrome on its way into the zoom and a quick single tap was
+            // sometimes swallowed outright. Each page now owns its own tap.
             .simultaneousGesture(revealDetails, including: zoom.isZoomed ? .subviews : .all)
 
             if showControls {
                 VStack {
                     topBar
                     Spacer()
-                    // Scrubbing along the strip is how you cross a long memory without
-                    // flicking through it one photograph at a time.
-                    ViewerFilmstrip(identifiers: identifiers, current: $current)
-                        .padding(.bottom, Space.s)
+                    bottomSlot
                     bottomCluster
                 }
                 .transition(.opacity)
@@ -85,8 +116,12 @@ struct PhotoViewerView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, Space.l)
                     .padding(.vertical, Space.m)
-                    .glassPanel(cornerRadius: 20, tone: .clear)
+                    .background(ViewerSurface.fill, in: .capsule)
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    // A note about what just happened must never be the thing that eats the
+                    // next tap. This sits in the middle of the picture for a second and a half,
+                    // right where the finger is.
+                    .allowsHitTesting(false)
             }
         }
         .statusBarHidden(!showControls)
@@ -96,17 +131,20 @@ struct PhotoViewerView: View {
         .interactiveDismissDisabled(zoom.isZoomed)
         .animation(.smooth(duration: 0.28), value: showControls)
         .animation(.smooth(duration: 0.25), value: confirmationText)
-        .onAppear { scheduleHide() }
-        .onChange(of: current) { _, _ in
-            zoom = ViewerZoom()
-            lovedOverride = nil
-            app.feedback.recordAssetSeen([current])
-            scheduleHide()
-        }
+        .onAppear { settleOnCurrent() }
+        .onDisappear { releasePlayer() }
+        .onChange(of: current) { _, _ in settleOnCurrent() }
         // Off the main actor and cancelled when the page turns, because scrubbing the
         // filmstrip changes `current` many times a second and each of these is a hit on the
         // Photos database.
-        .task(id: current) { await reconcileLoved() }
+        .task(id: current) { await loadCurrent() }
+        // The play button has to agree with the player. Without this a clip that runs to its
+        // end leaves a pause icon on screen over a video that has stopped, and the tap that
+        // restarts it from the beginning looks like a tap that did nothing.
+        .onReceive(NotificationCenter.default.publisher(for: AVPlayerItem.didPlayToEndTimeNotification)) { note in
+            guard let item = note.object as? AVPlayerItem, item === player?.currentItem else { return }
+            isPlaying = false
+        }
         .sheet(isPresented: $showDetails) {
             AssetDetailsView(identifier: current)
                 .presentationDetents([.medium, .large])
@@ -148,17 +186,19 @@ struct PhotoViewerView: View {
 
     /// Vertical swipes on the photograph: up for the details panel, down to leave.
     ///
-    /// Swipe-down-to-dismiss matters more than it looks. The controls fade after a couple of
-    /// seconds, and a full-screen cover has no interactive dismiss of its own, so without this
-    /// the only way out of a photograph is a button that is no longer on screen — you have to
-    /// know to tap first. Photos has always let you throw the picture away downward, and the
-    /// gesture is what people reach for.
+    /// Swipe-down-to-dismiss matters more than it looks. A full-screen cover has no interactive
+    /// dismiss of its own, and Photos has always let you throw the picture away downward, so
+    /// this is the gesture people reach for before they look for a button.
     ///
     /// Two other gestures already want this touch: the pager's horizontal scroll and the tap
     /// that toggles the controls. So this runs *simultaneously* rather than competing — it
     /// never claims the touch while the finger is down, and decides only once the finger
-    /// lifts, and only when the movement was clearly vertical. A horizontal flick still turns
-    /// the page, and a tap never travels far enough to reach here.
+    /// lifts, and only when the movement was clearly vertical. A tap never travels far enough
+    /// to reach here.
+    ///
+    /// "Clearly vertical" is half, not most. A flick towards the next photograph that drifts
+    /// downwards on the way is still a page turn, and throwing the picture away on one of
+    /// those was the surprise.
     ///
     /// A third gesture wants it once the photograph is enlarged: panning. Being simultaneous,
     /// this one would fire on top of the pan and throw the picture away as the user pushed it
@@ -167,8 +207,8 @@ struct PhotoViewerView: View {
         DragGesture(minimumDistance: 24)
             .onEnded { value in
                 let vertical = value.translation.height
-                guard abs(vertical) > 60,
-                      abs(value.translation.width) < abs(vertical) * 0.6 else { return }
+                guard abs(vertical) > 72,
+                      abs(value.translation.width) < abs(vertical) * 0.5 else { return }
 
                 Haptics.impact(.soft)
                 if vertical < 0 {
@@ -187,18 +227,79 @@ struct PhotoViewerView: View {
             Spacer()
             // The moment it happened, not the day the file arrived — otherwise a clip saved
             // from a message would be labelled with the day it was saved.
-            if let record { Text(record.momentDate, format: .dateTime.month(.abbreviated).day().year())
-                .font(Typo.meta)
-                .foregroundStyle(.white.opacity(0.9))
-                .padding(.horizontal, Space.m)
-                .padding(.vertical, 7)
-                .glassPanel(cornerRadius: 14, tone: .clear)
+            //
+            // Flat, not glass, and never tappable: see `ViewerSurface`.
+            if let record {
+                Text(record.momentDate, format: .dateTime.month(.abbreviated).day().year())
+                    .font(Typo.meta)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, Space.m)
+                    .padding(.vertical, 7)
+                    .background(ViewerSurface.fill, in: .capsule)
+                    .allowsHitTesting(false)
             }
             Spacer()
-            Color.clear.frame(width: 46, height: 46)
+            if record?.isVideo == true {
+                // Sound sits at the top, away from the transport and away from the thumb
+                // resting at the bottom of the phone. It also fills what used to be an
+                // invisible 46-point square in this corner: `Color.clear` takes touches like
+                // any other view, so every tap aimed at the corner vanished into it.
+                GlassIconButton(systemImage: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                                label: isMuted ? "Unmute" : "Mute",
+                                tone: .clear) {
+                    toggleMute()
+                }
+            } else {
+                Color.clear
+                    .frame(width: 46, height: 46)
+                    .allowsHitTesting(false)
+            }
         }
         .padding(.horizontal, Space.gutter)
         .padding(.top, Space.s)
+    }
+
+    /// What sits directly above the button cluster: the transport for a video, the filmstrip
+    /// for anything else. Never both.
+    ///
+    /// They used to be both, in the same band of the screen. The video's control strip was
+    /// positioned by guessing how tall the viewer's own chrome was, and the guess was about
+    /// thirty points short, so the filmstrip — drawn afterwards and therefore on top —
+    /// answered every touch aimed at the scrubber underneath it. Two panes of clear glass
+    /// overlapping look like one, which is why this never showed up in a screenshot.
+    ///
+    /// Whoever is in the slot, it is the same height. The strip and the transport are not the
+    /// same size, and letting the slot follow its occupant moved the heart and the ••• menu up
+    /// the screen every time a swipe crossed from a photograph to a clip — a button that walks
+    /// away between one page and the next is a button you miss.
+    @ViewBuilder
+    private var bottomSlot: some View {
+        if let player {
+            VideoTransport(player: player, isPlaying: $isPlaying)
+                // One transport per player, never a reused one handed a new player. The
+                // observer it installs belongs to the player that issued it, and a view that
+                // survived the swap would go on reporting the position of the clip before it.
+                .id(ObjectIdentifier(player))
+                .frame(height: slotHeight)
+                .padding(.bottom, Space.s)
+        } else if record?.isVideo == true {
+            // Held open while the clip is still being fetched from the library, so the strip
+            // does not appear for an instant and get swapped out from under a thumb that is
+            // already moving towards it.
+            Color.clear
+                .frame(height: slotHeight)
+                .padding(.bottom, Space.s)
+                .allowsHitTesting(false)
+        } else if identifiers.count > 1 {
+            // Scrubbing along the strip is how you cross a long memory without flicking
+            // through it one photograph at a time. A set of one has nothing to scrub, and the
+            // decision is taken here rather than left to the strip because the slot must
+            // collapse with it — otherwise a single photograph opens with an empty band of
+            // reserved space under it.
+            ViewerFilmstrip(identifiers: identifiers, current: $current)
+                .frame(height: slotHeight)
+                .padding(.bottom, Space.s)
+        }
     }
 
     private var bottomCluster: some View {
@@ -239,6 +340,7 @@ struct PhotoViewerView: View {
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
                         .frame(width: 46, height: 46)
+                        .contentShape(.circle)
                 }
                 .glassControl(.circle, tone: .clear)
                 .accessibilityLabel("More actions")
@@ -247,9 +349,70 @@ struct PhotoViewerView: View {
         .padding(.bottom, Space.xl)
     }
 
+    // MARK: Paging
+
+    /// Everything that belonged to the photograph being left behind, put back before the next
+    /// one arrives.
+    ///
+    /// All of it has outlived a page turn at one time or another: a heart still lit from the
+    /// previous picture, a zoom that kept the pager switched off, a clip still playing out of
+    /// sight with its sound on.
+    private func settleOnCurrent() {
+        zoom = ViewerZoom()
+        lovedOverride = nil
+        isMuted = !app.settings.playAudio
+        record = fetchRecord()
+        releasePlayer()
+    }
+
+    /// The slow half of arriving at a photograph, run behind a short pause.
+    ///
+    /// Dragging the filmstrip walks `current` through every photograph between where the
+    /// finger started and where it is now. Asking Photos for a player item, reconciling the
+    /// heart against the library and recording the photograph as seen for each one of those
+    /// would spend the whole gesture starting work that is obsolete before it lands.
+    /// `task(id:)` cancels the previous run on every change, so the pause only ever elapses
+    /// for the photograph the user actually stopped on.
+    private func loadCurrent() async {
+        try? await Task.sleep(for: .milliseconds(140))
+        guard !Task.isCancelled else { return }
+
+        app.feedback.recordAssetSeen([current])
+        await reconcileLoved()
+        await loadPlayer()
+    }
+
+    private func loadPlayer() async {
+        guard let record, record.isVideo,
+              let asset = PhotoLibraryService.asset(for: current),
+              let item = await PhotoImageLoader.shared.playerItem(for: asset),
+              !Task.isCancelled else { return }
+
+        // The page showed the poster frame while this was loading, and a poster frame can be
+        // pinched. Handing the picture over to a player that cannot zoom while the zoom is
+        // still held would leave the pager switched off with no way to switch it back on.
+        zoom = ViewerZoom()
+
+        let loaded = AVPlayer(playerItem: item)
+        loaded.isMuted = isMuted
+        player = loaded
+
+        if app.settings.autoplayVideos {
+            loaded.play()
+            isPlaying = true
+        }
+    }
+
+    /// Nothing is left playing behind the user.
+    private func releasePlayer() {
+        player?.pause()
+        player = nil
+        isPlaying = false
+    }
+
     // MARK: Actions
 
-    private var record: AssetRecord? {
+    private func fetchRecord() -> AssetRecord? {
         LibraryQuery.records(for: [current], context: app.container.mainContext).first
     }
 
@@ -268,16 +431,12 @@ struct PhotoViewerView: View {
 
     private func toggleControls() {
         showControls.toggle()
-        if showControls { scheduleHide() } else { hideTask?.cancel() }
     }
 
-    private func scheduleHide() {
-        hideTask?.cancel()
-        hideTask = Task {
-            try? await Task.sleep(for: .seconds(2.5))
-            guard !Task.isCancelled else { return }
-            showControls = false
-        }
+    private func toggleMute() {
+        isMuted.toggle()
+        player?.isMuted = isMuted
+        Haptics.impact(.light)
     }
 
     /// The heart writes through to Photos, and says so when it cannot.
@@ -423,6 +582,29 @@ struct PhotoViewerView: View {
     }
 }
 
+// MARK: - Surfaces
+
+/// The flat surface every control in the viewer that carries text or fine detail sits on.
+///
+/// It is not glass, and that is the whole point of it. Liquid Glass works by bending what is
+/// behind it, and behind a control in here there is either a photograph or — wherever the
+/// picture does not reach — pure black. Over black there is nothing to refract, so all that
+/// survives of the material is the specular highlight along its top edge, and on a wide
+/// straight-edged panel that draws as a hard white line across an otherwise dark slab. On the
+/// device it reads as a rendering fault rather than as a material, and it is a fair part of
+/// what the controls over video were being called.
+///
+/// So the viewer keeps two vocabularies rather than one. Round glyph buttons stay glass: a
+/// specular rim on a circle is what Liquid Glass looks like everywhere else in iOS, and it
+/// reads as a material because it is one. Anything wide and straight-edged — the filmstrip,
+/// the video transport, the date, a confirmation — is this instead, which is honest over black
+/// and keeps white type legible over a bright photograph. `Palette.photoScrim` is the same
+/// idea at the weight used under content that is already opaque; this one is heavier because
+/// small white text has to survive on it.
+enum ViewerSurface {
+    static let fill = Color.black.opacity(0.55)
+}
+
 // MARK: - Zoom
 
 /// How far into the still on screen the viewer is currently zoomed.
@@ -443,31 +625,37 @@ struct ViewerZoom: Equatable {
 // MARK: - One page
 
 /// Draws whichever kind of asset this is, natively: a still, a real Live Photo, or a video.
+///
+/// Every branch answers a tap on itself. That is the whole reason the viewer above has no tap
+/// gesture of its own: one finger on the picture must reach exactly one gesture, and the only
+/// way to guarantee that is for the view that draws the picture to be the view that owns it.
 private struct ViewerPage: View {
     let identifier: String
     let isCurrent: Bool
-    let showControls: Bool
+    /// Only ever set for the photograph on screen. The pages either side show their poster
+    /// frame instead, which is what they would have shown anyway while a player loaded.
+    let player: AVPlayer?
     @Binding var zoom: ViewerZoom
     let onSurfaceTap: () -> Void
 
     @Environment(\.app) private var app
     @State private var livePhoto: PHLivePhoto?
-    @State private var player: AVPlayer?
-    @State private var record: AssetRecord?
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
                 Color.black
                 if let player {
-                    MemoryVideoPlayer(player: player,
-                                      showControls: showControls,
-                                      autoplay: app.settings.autoplayVideos && isCurrent,
-                                      onSurfaceTap: onSurfaceTap)
+                    MemoryVideoPlayer(player: player, onSurfaceTap: onSurfaceTap)
                 } else if let livePhoto {
-                    LivePhotoView(livePhoto: livePhoto, isPlaying: isCurrent && app.settings.playLivePhotos)
+                    LivePhotoView(livePhoto: livePhoto,
+                                  isPlaying: isCurrent && app.settings.playLivePhotos,
+                                  onTap: onSurfaceTap)
                 } else {
-                    ZoomableStill(identifier: identifier, size: proxy.size, zoom: $zoom)
+                    ZoomableStill(identifier: identifier,
+                                  size: proxy.size,
+                                  zoom: $zoom,
+                                  onSurfaceTap: onSurfaceTap)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
@@ -475,38 +663,42 @@ private struct ViewerPage: View {
         .task(id: identifier) { await prepare() }
     }
 
+    /// The pager recycles these pages, so whatever the last photograph left behind is cleared
+    /// before the next one is asked for. Without that, a page that had held a Live Photo and
+    /// came back holding an ordinary still went on playing the Live Photo.
     private func prepare() async {
-        record = LibraryQuery.records(for: [identifier], context: app.container.mainContext).first
-        guard let record, let asset = PhotoLibraryService.asset(for: identifier) else { return }
+        livePhoto = nil
 
-        if record.isVideo {
-            if let item = await PhotoImageLoader.shared.playerItem(for: asset) {
-                let player = AVPlayer(playerItem: item)
-                player.isMuted = !app.settings.playAudio
-                self.player = player
-            }
-        } else if record.isLivePhoto, app.settings.playLivePhotos {
-            let size = CGSize(width: 1600, height: 1600)
-            livePhoto = await PhotoImageLoader.shared.livePhoto(for: asset, targetSize: size)
-        }
+        guard let record = LibraryQuery.records(for: [identifier],
+                                                context: app.container.mainContext).first,
+              record.isLivePhoto,
+              app.settings.playLivePhotos,
+              let asset = PhotoLibraryService.asset(for: identifier) else { return }
+
+        let size = CGSize(width: 1600, height: 1600)
+        livePhoto = await PhotoImageLoader.shared.livePhoto(for: asset, targetSize: size)
     }
 }
 
 /// A still you can pinch and double tap into, the first thing anyone tries on a photograph.
 ///
-/// Only stills get this. A video has its own controls under the finger and a Live Photo is
-/// played by `PHLivePhotoView`, which owns its own touches.
+/// Only stills get this. A video has a player under the finger and a Live Photo is played by
+/// `PHLivePhotoView`, which owns its own touches.
 ///
-/// Three gestures already run on this touch — the pager underneath, the tap that toggles the
-/// controls, and the viewer's vertical drag — so nothing here is allowed to claim a touch it
-/// does not need. The pan is masked out entirely at fit scale, which leaves the pager exactly
-/// as it was; it only comes alive once the picture is bigger than the screen, and from then
-/// on it wins the horizontal drag because it sits below the pager in the hierarchy. The pinch
-/// is simultaneous so that a second finger never has to fight the pan for the touch.
+/// Both taps live here, on one view, larger count first — that is the order SwiftUI resolves
+/// them in. They used to be two levels apart, the double tap on the picture and the single tap
+/// on the pager above it, which is a pairing nothing arbitrates.
+///
+/// The drags are more delicate. The pager runs underneath and the viewer's vertical drag runs
+/// above, so nothing here claims a touch it does not need: the pan is masked out entirely at
+/// fit scale, which leaves the pager exactly as it was, and only comes alive once the picture
+/// is bigger than the screen. The pinch is simultaneous so that a second finger never has to
+/// fight the pan for the touch.
 private struct ZoomableStill: View {
     let identifier: String
     let size: CGSize
     @Binding var zoom: ViewerZoom
+    let onSurfaceTap: () -> Void
 
     /// Where the picture stood when the gesture now running began. Both gestures report a
     /// total measured from their own start, so without a fixed base every event would
@@ -535,6 +727,7 @@ private struct ZoomableStill: View {
             // are written in, however far the picture has been pushed.
             .contentShape(.rect)
             .onTapGesture(count: 2, coordinateSpace: .local) { location in toggleZoom(at: location) }
+            .onTapGesture { onSurfaceTap() }
             .gesture(pan, including: zoom.isZoomed ? .all : .subviews)
             .simultaneousGesture(pinch)
     }
@@ -624,16 +817,38 @@ private struct ZoomableStill: View {
 private struct LivePhotoView: UIViewRepresentable {
     let livePhoto: PHLivePhoto
     let isPlaying: Bool
+    let onTap: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap) }
 
     func makeUIView(context: Context) -> PHLivePhotoView {
         let view = PHLivePhotoView()
         view.contentMode = .scaleAspectFit
+        // The chrome toggle is added as a recognizer on the live photo view itself rather than
+        // as a SwiftUI tap on a transparent layer above it. A layer above would have to be
+        // hit-testable to receive the tap, and it would then swallow press-and-hold as well —
+        // which is the one gesture a Live Photo exists for.
+        view.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator,
+                                                         action: #selector(Coordinator.handleTap)))
         return view
     }
 
     func updateUIView(_ view: PHLivePhotoView, context: Context) {
+        context.coordinator.onTap = onTap
         if view.livePhoto != livePhoto { view.livePhoto = livePhoto }
         if isPlaying { view.startPlayback(with: .full) } else { view.stopPlayback() }
+    }
+
+    final class Coordinator: NSObject {
+        var onTap: () -> Void
+
+        init(onTap: @escaping () -> Void) {
+            self.onTap = onTap
+        }
+
+        @objc func handleTap() {
+            onTap()
+        }
     }
 }
 

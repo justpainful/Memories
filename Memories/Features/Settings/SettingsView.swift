@@ -187,6 +187,10 @@ struct MemoryFrequencyView: View {
         }
         .navigationTitle("Memory Frequency")
         .navigationBarTitleDisplayMode(.inline)
+        // The app draws its own floating bar over every screen, so each scrolling surface has
+        // to reserve room for it. Every sibling screen does; this one was missed, which left
+        // the last row sitting underneath the bar with no way to scroll it clear.
+        .contentMargins(.bottom, 132, for: .scrollContent)
         .task { authorization = await MemoryNotifications.authorizationDescription() }
     }
 
