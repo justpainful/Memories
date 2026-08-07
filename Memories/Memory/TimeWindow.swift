@@ -203,9 +203,9 @@ extension Calendar {
     }
 
     /// Meteorological seasons: whole months, which is what people mean by "last summer".
-    func seasonInterval(for date: Date) -> DateInterval? {
-        let month = component(.month, from: date)
-        let year = component(.year, from: date)
+    func seasonInterval(for moment: Date) -> DateInterval? {
+        let month = component(.month, from: moment)
+        let year = component(.year, from: moment)
         let start: (year: Int, month: Int)
         switch month {
         case 3...5:   start = (year, 3)
