@@ -31,9 +31,15 @@ struct RootView: View {
     @Environment(\.app) private var app
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var selection: AppTab = .memories
+    @State private var selection: AppTab = Self.initialTab
     @State private var isExploring = false
     @State private var exploreDestination: TimeWindow?
+
+    /// Launch arguments of the form `-startTab timeline` land in `NSArgumentDomain`, which
+    /// lets CI screenshot each surface without needing to synthesise taps.
+    private static var initialTab: AppTab {
+        AppTab(rawValue: UserDefaults.standard.string(forKey: "startTab") ?? "") ?? .memories
+    }
 
     var body: some View {
         Group {

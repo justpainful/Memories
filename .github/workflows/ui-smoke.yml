@@ -78,16 +78,34 @@ jobs:
           xcrun simctl install "${{ steps.sim.outputs.udid }}" "$app"
           xcrun simctl privacy "${{ steps.sim.outputs.udid }}" grant photos "$BUNDLE_ID"
 
-      - name: Launch and capture
+      - name: Launch and capture every surface
         run: |
           set -euo pipefail
+          udid="${{ steps.sim.outputs.udid }}"
           mkdir -p Screenshots
-          xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" "$BUNDLE_ID" \
-            > Screenshots/console.log 2>&1 &
-          for i in 3 8 16 26; do
-            sleep "$i"
-            xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot "Screenshots/t${i}s.png" || true
-          done
+
+          shoot() {   # name, settle seconds, launch args...
+            local name="$1"; local settle="$2"; shift 2
+            xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
+            sleep 1
+            xcrun simctl launch "$udid" "$BUNDLE_ID" "$@" >/dev/null
+            sleep "$settle"
+            xcrun simctl io "$udid" screenshot "Screenshots/${name}.png"
+            echo "captured ${name}"
+          }
+
+          # First run of a fresh install: the permission promise screen.
+          shoot 01-onboarding 6
+
+          # Then past it, with time for indexing to have produced something to show.
+          shoot 02-home 55 -hasSeenOnboarding YES -startTab memories
+          shoot 03-timeline 12 -hasSeenOnboarding YES -startTab timeline
+          shoot 04-library 10 -hasSeenOnboarding YES -startTab library
+
+          xcrun simctl ui "$udid" appearance dark
+          shoot 05-home-dark 14 -hasSeenOnboarding YES -startTab memories
+          xcrun simctl ui "$udid" appearance light
+
           ls -la Screenshots
 
       - name: Check the app is still alive and did not crash
@@ -103,7 +121,6 @@ jobs:
           fi
           if ! xcrun simctl spawn "${{ steps.sim.outputs.udid }}" launchctl list 2>/dev/null | grep -q "$BUNDLE_ID"; then
             echo "::error::App is not running after launch"
-            cat Screenshots/console.log || true
             exit 1
           fi
           echo "App alive, no crash reports."
