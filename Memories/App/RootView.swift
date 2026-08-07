@@ -102,7 +102,14 @@ struct RootView: View {
         guard let target = MemoryIntentRouter.shared.take() else { return }
         switch target {
         case .window(let window):
-            isExploring = false
+            // Presenting the sheet in the same tick that starts the panel folding back into the
+            // bar leaves that morph running underneath it, and a glass morph interrupted
+            // half-way is a smear across the bottom of the screen rather than a control. The
+            // panel is given its own animation to finish before the sheet arrives on top.
+            if isExploring {
+                isExploring = false
+                try? await Task.sleep(for: .seconds(ExploreTimeBar.morphDuration))
+            }
             exploreDestination = window
         case .topMemory:
             intentMemory = await MemoryIntentRouter.topMemory(app: app)
@@ -134,7 +141,10 @@ struct RootView: View {
                 exploreDestination = window
             }
         }
-        .animation(.smooth(duration: 0.42), value: isExploring)
+        // The same curve and duration the bar animates itself on. Two layers move on this one
+        // value — the panel and the dim behind it — and if they disagree the dim arrives
+        // without its panel.
+        .animation(.smooth(duration: ExploreTimeBar.morphDuration), value: isExploring)
         .sheet(item: $exploreDestination) { window in
             TimeWindowResultsView(window: window)
         }

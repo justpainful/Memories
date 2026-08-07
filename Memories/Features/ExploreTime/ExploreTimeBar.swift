@@ -14,6 +14,13 @@ struct ExploreTimeBar: View {
     @Binding var isExploring: Bool
     let onSelectWindow: (TimeWindow) -> Void
 
+    /// How long the bar takes to become the time panel, and back.
+    ///
+    /// Declared once because more than one layer animates on it — the panel here, the dim
+    /// behind it in `RootView` — and they have to arrive together. Anything that needs to wait
+    /// for the morph to finish waits for this rather than guessing at a number.
+    static let morphDuration = 0.42
+
     @Namespace private var glass
 
     var body: some View {
@@ -55,7 +62,7 @@ struct ExploreTimeBar: View {
         // The innermost one wins inside its own subtree, so the two are not competing — but
         // they do have to stay the same curve and the same duration, or the panel and the dim
         // it sits on will arrive at different moments.
-        .animation(.smooth(duration: 0.42), value: isExploring)
+        .animation(.smooth(duration: Self.morphDuration), value: isExploring)
     }
 
     // MARK: Collapsed
