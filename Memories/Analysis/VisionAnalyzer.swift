@@ -13,6 +13,10 @@ struct FrameAnalysis: Sendable {
     var faceCount: Int = 0
     var bestFaceQuality: Double?
     var sharpness: Double?
+    /// How the salient subject sits against classical placement, 0...1.
+    var composition: Double?
+    /// The share of the frame the salient subject occupies, 0...1.
+    var subjectProminence: Double?
     var averageColor: Int = 0
 }
 
@@ -46,9 +50,73 @@ enum VisionAnalyzer {
                 .max()
         }
 
+        // Saliency — what the frame is *of*, and where that thing sits in it.
+        if let subject = await salientSubject(in: cgImage) {
+            result.subjectProminence = min(1, Double(subject.width * subject.height))
+            result.composition = composition(of: subject)
+        }
+
         result.sharpness = sharpness(of: cgImage)
         result.averageColor = AmbientColor.average(of: image) ?? 0
         return result
+    }
+
+    /// The salient region that stands in for the subject: the largest box either saliency
+    /// request can point at.
+    ///
+    /// Attention comes first because it answers the question the score is actually asking —
+    /// where a viewer's eye goes. Objectness is the fallback rather than the default: it
+    /// finds objects in frames nobody's eye settles on, which is exactly the case where
+    /// attention alone would report no subject at all.
+    private static func salientSubject(in cgImage: CGImage) async -> CGRect? {
+        if let observation = try? await GenerateAttentionBasedSaliencyImageRequest().perform(on: cgImage),
+           let box = largestSalientBox(in: observation) {
+            return box
+        }
+        if let observation = try? await GenerateObjectnessBasedSaliencyImageRequest().perform(on: cgImage) {
+            return largestSalientBox(in: observation)
+        }
+        return nil
+    }
+
+    private static func largestSalientBox(in observation: SaliencyImageObservation) -> CGRect? {
+        observation.salientObjects
+            .map { $0.boundingBox.cgRect }
+            .filter { !$0.isEmpty }
+            .max { $0.width * $0.height < $1.width * $1.height }
+    }
+
+    /// How closely the subject's centre lands on a placement people actually use: one of the
+    /// four rule-of-thirds intersections, or dead centre.
+    ///
+    /// This is a rule of thumb about where photographers put things, not a judgement of
+    /// whether a photograph works — plenty of good frames ignore it. It is scored shallowly
+    /// and weighted lightly for that reason, and only the clearly bad case, a subject whose
+    /// centre is hard against the frame edge, is treated as evidence of anything.
+    static func composition(of box: CGRect) -> Double {
+        let x = Double(box.midX), y = Double(box.midY)
+        let third = 1.0 / 3.0
+        let anchors: [(Double, Double)] = [
+            (third, third), (2 * third, third),
+            (third, 2 * third), (2 * third, 2 * third),
+            (0.5, 0.5)
+        ]
+
+        // No point in the frame is further than about 0.47 from every anchor, so half the
+        // frame is the distance at which "badly placed" has already saturated.
+        let nearest = anchors.map { hypot(x - $0.0, y - $0.1) }.min() ?? 0.5
+        var score = max(0, 1 - nearest / 0.5)
+
+        // A subject centred on the edge is usually half out of shot, or the camera was
+        // pointed at something else entirely.
+        let edgeDistance = min(min(x, 1 - x), min(y, 1 - y))
+        switch edgeDistance {
+        case ..<0.08: score -= 0.35
+        case ..<0.15: score -= 0.15
+        default:      break
+        }
+
+        return min(1, max(0, score))
     }
 
     /// Variance of the Laplacian, the standard cheap focus measure, computed on a small

@@ -4,7 +4,7 @@ import SwiftData
 
 /// Bumped when a stage's meaning changes. Rows below this are recomputed; everything else
 /// is left alone, which is what keeps a second launch cheap.
-let currentAnalysisVersion = 1
+let currentAnalysisVersion = 2
 
 /// All database work for indexing, on its own actor with its own context.
 ///
@@ -119,6 +119,8 @@ actor LibraryIndexer {
         record.faceCount = analysis.faceCount
         record.faceQuality = analysis.bestFaceQuality
         record.sharpness = analysis.sharpness
+        record.composition = analysis.composition
+        record.subjectProminence = analysis.subjectProminence
         record.averageColor = analysis.averageColor
         record.isUtilityImage = analysis.isUtility
         record.memoryScore = QualityScorer.score(inputs(for: record, analysis: analysis))
@@ -150,6 +152,8 @@ actor LibraryIndexer {
             aesthetics: analysis.aesthetics,
             isUtility: analysis.isUtility,
             sharpness: analysis.sharpness,
+            composition: analysis.composition,
+            subjectProminence: analysis.subjectProminence,
             faceCount: analysis.faceCount,
             bestFaceQuality: analysis.bestFaceQuality,
             averageColor: analysis.averageColor,
@@ -257,6 +261,8 @@ actor LibraryIndexer {
             aesthetics: record.aestheticsScore,
             isUtility: record.isUtilityImage,
             sharpness: record.sharpness,
+            composition: record.composition,
+            subjectProminence: record.subjectProminence,
             faceCount: record.faceCount,
             bestFaceQuality: record.faceQuality,
             averageColor: record.averageColor,
@@ -325,6 +331,8 @@ actor LibraryIndexer {
                 record.aestheticsScore = nil
                 record.faceQuality = nil
                 record.sharpness = nil
+                record.composition = nil
+                record.subjectProminence = nil
                 record.memoryScore = 0
                 record.analysisVersion = 0
                 record.similarityClusterID = nil

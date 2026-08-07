@@ -44,6 +44,12 @@ final class AssetRecord {
     var faceQuality: Double?
     var faceCount: Int = 0
     var sharpness: Double?
+
+    /// Saliency, kept alongside the other measurements so the rescoring pass that runs after
+    /// clustering can reuse them without going back to the pixels.
+    var composition: Double?
+    var subjectProminence: Double?
+
     var averageColor: Int = 0
 
     /// Vision's judgement that this is a document, receipt or saved image rather than a

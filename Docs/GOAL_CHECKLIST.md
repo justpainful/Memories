@@ -37,8 +37,9 @@ Legend: ✅ done · 🟡 partial · ⬜ not done
   Previous Years, Same Weekend in Previous Years
 - 🟡 5. Cross-year: "Every August" is reachable for the current month. All twelve exist in
   `everyMonthWindows` but only one is surfaced — twelve rows would bury the Explore panel.
-- 🟡 6. Best of month and year are generated. Best of **day, week and trip** are not: there is
-  no trip concept in the app, and day/week are not offered as user-selectable filters.
+- ✅ 6. Best Of as a screen the user picks from: day, week, month, year, trip, place, occasion.
+  A trip is a run of occasions spanning two or more days more than 100 km from the median of
+  every located photo — a median, so one month abroad cannot drag "home" across a continent.
 - ✅ 6. Forgotten, Rarely Seen, Recently Rediscovered — all three, and distinct from each other
 - ✅ 6. Smart Random avoids screenshots, duplicates, weak frames and anything seen this week
 - ✅ **Signature.** Explore Time morphs out of the tab bar's own glass
@@ -47,10 +48,11 @@ Legend: ✅ done · 🟡 partial · ⬜ not done
 - ✅ 7. Events from time gaps, distance, shooting density and visual continuity
 - ✅ 8. Similarity clusters with an elected Best Shot; nothing deleted; "Show all N"
 - ✅ 9. Vision `GenerateImageFeaturePrintRequest` → stored vectors → clusters
-- 🟡 10. Memory Quality Score blends aesthetics, sharpness, exposure, faces, face quality,
-  resolution, screenshot penalty, duplicate count and burst position. **Composition and
-  subject prominence are not computed** — Vision exposes no measure of either, and inventing
-  one from bounding boxes would be a guess dressed as a score.
+- ✅ 10. Memory Quality Score blends aesthetics, sharpness, exposure, faces, face quality,
+  subject prominence, composition, resolution, screenshot penalty, duplicate count and burst
+  position. Prominence and composition come from Vision's saliency requests on the frame the
+  other passes already decoded. Composition is a rule of thumb about where photographers put
+  things, not a verdict on whether a picture works, so it is weighted to break a tie and no more.
 - ✅ 10. `CalculateImageAestheticsScoresRequest` used; no score is ever shown to the user
 - ✅ 11. Face capture quality decides between near-identical portraits
 - ✅ 24. Videos analysed from a representative frame, scored, and given event membership
@@ -58,8 +60,9 @@ Legend: ✅ done · 🟡 partial · ⬜ not done
 ## Viewing
 - ✅ 12. Pure / Smart, switchable in place
 - ✅ 13. Full screen, floating glass controls, swipe, native video, native Live Photo
-- 🟡 13. `•••` — all eight present and working. "Open in Photos" is renamed from "Show in
-  Photos" because iOS has no public API to deep-link one asset; it opens the Photos app.
+- 🟡 13. `•••` — all eight present and working. "Show in Photos" attempts a direct link to
+  the asset and falls back to opening Photos if the system refuses, because iOS publishes no
+  documented URL for one asset. The fallback means the control always does something.
 - ✅ 14. Hide ≠ Delete, with a Hidden Memories screen and per-tile Restore
 - ✅ 15. Collections hold photos, videos, occasions, days and memories
 - 🟡 16. Timeline: year → month → day with a drag scrubber

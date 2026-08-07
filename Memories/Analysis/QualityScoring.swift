@@ -4,15 +4,17 @@ import Foundation
 ///
 /// No single measure decides whether a frame is worth remembering — a tack-sharp photo of a
 /// parking meter is not a memory, and a slightly soft photo of someone laughing is. So the
-/// score blends what Vision can judge (aesthetics, face capture quality), what the pixels
-/// can tell us (sharpness, exposure), what the file says (resolution, screenshot, burst
-/// position), and the one unambiguous human signal available (the user favourited it).
+/// score blends what Vision can judge (aesthetics, face capture quality, saliency), what
+/// the pixels can tell us (sharpness, exposure), what the file says (resolution, screenshot,
+/// burst position), and the one unambiguous human signal available (the user favourited it).
 ///
 /// The result is internal ranking only. The user never sees a number next to a photo.
 struct QualityInputs {
     var aesthetics: Double?        // -1...1 from Vision
     var isUtility: Bool = false    // Vision says: document/receipt/screenshot, not a photograph
     var sharpness: Double?         // 0...1
+    var composition: Double?       // 0...1, where the salient subject sits in the frame
+    var subjectProminence: Double? // 0...1, share of the frame the salient subject fills
     var faceCount: Int = 0
     var bestFaceQuality: Double?   // 0...1
     var averageColor: Int = 0
@@ -41,6 +43,20 @@ enum QualityScorer {
         }
 
         score += exposureAdjustment(for: input.averageColor)
+
+        // A frame whose subject fills a decent share of it is a photograph of something;
+        // one where the subject is a speck usually isn't. Past about a third of the frame
+        // the distinction stops carrying information, so the reward stops there too.
+        if let prominence = input.subjectProminence {
+            score += (min(prominence, 0.35) / 0.35 - 0.4) * 0.10
+        }
+
+        // Composition is a guess about intent read off a bounding box, so it is allowed to
+        // separate two otherwise equal frames and nothing more. Both saliency terms together
+        // move the score less than aesthetics or face quality can on their own.
+        if let composition = input.composition {
+            score += (composition - 0.5) * 0.08
+        }
 
         // People. A well-captured face is the strongest reason a frame becomes a memory.
         if input.faceCount > 0 {

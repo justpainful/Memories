@@ -143,7 +143,7 @@ struct PhotoViewerView: View {
                 }
 
                 Menu {
-                    Button("Open in Photos", systemImage: "photo.on.rectangle.angled") { openPhotos() }
+                    Button("Show in Photos", systemImage: "photo.on.rectangle.angled") { openPhotos() }
                     Button("Share", systemImage: "square.and.arrow.up") { Task { await prepareShare() } }
                     Button("Save to a collection", systemImage: "plus.rectangle.on.folder") {
                         isSaving = true
@@ -241,10 +241,25 @@ struct PhotoViewerView: View {
         dayWindow = .dayAcrossYears(month: month, day: day)
     }
 
-    /// There is no public API to deep-link a specific asset, so this opens Photos itself.
+    /// Open this exact photograph in Photos, falling back to opening Photos itself.
+    ///
+    /// A `localIdentifier` looks like `UUID/L0/001`; Photos addresses an asset by the UUID
+    /// in front. There is no *documented* URL for this, so it is attempted and checked
+    /// rather than trusted: if the system cannot open it, `photos-redirect://` still gets
+    /// the user to their library instead of the button appearing to do nothing.
     private func openPhotos() {
-        guard let url = URL(string: "photos-redirect://") else { return }
-        UIApplication.shared.open(url)
+        let uuid = current.components(separatedBy: "/").first ?? current
+        let fallback = URL(string: "photos-redirect://")
+
+        guard let direct = URL(string: "photos://asset?id=\(uuid)") else {
+            if let fallback { UIApplication.shared.open(fallback) }
+            return
+        }
+
+        UIApplication.shared.open(direct) { opened in
+            guard !opened, let fallback else { return }
+            UIApplication.shared.open(fallback)
+        }
     }
 
     private func prepareShare() async {
