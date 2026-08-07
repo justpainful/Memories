@@ -172,7 +172,7 @@ final class PhotoLibraryService {
     ///
     /// `includeAssetSourceTypes` deliberately excludes `.typeCloudShared`: shared-album
     /// content is not the user's own library and has no business appearing in their memories.
-    static func makeFetchOptions(includeHidden: Bool = false) -> PHFetchOptions {
+    nonisolated static func makeFetchOptions(includeHidden: Bool = false) -> PHFetchOptions {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.includeHiddenAssets = includeHidden
@@ -180,15 +180,21 @@ final class PhotoLibraryService {
         return options
     }
 
-    static func currentAssetCount() -> Int {
+    nonisolated static func currentAssetCount() -> Int {
         PHAsset.fetchAssets(with: makeFetchOptions()).count
     }
 
     /// Walk the whole library without materialising it: `PHFetchResult` is lazy, and the
     /// snapshots are produced in chunks so a 100k library never sits in memory at once.
-    func enumerateSnapshots(chunkSize: Int = 500,
-                            handler: @escaping ([AssetSnapshot]) async -> Void) async {
-        let result = PHAsset.fetchAssets(with: Self.makeFetchOptions())
+    ///
+    /// `nonisolated` is the point of it. Lazy means every asset is faulted in from the Photos
+    /// database at the moment it is reached, so a library of fifteen thousand is fifteen
+    /// thousand small reads — and doing those where the frames are drawn is a launch that
+    /// looks like the app has stopped responding. Static because nothing in here needs the
+    /// service's own state, which is what lets it be called from anywhere.
+    nonisolated static func enumerateSnapshots(chunkSize: Int = 400,
+                                               handler: ([AssetSnapshot]) async -> Void) async {
+        let result = PHAsset.fetchAssets(with: makeFetchOptions())
         var buffer: [AssetSnapshot] = []
         buffer.reserveCapacity(chunkSize)
 
@@ -197,6 +203,9 @@ final class PhotoLibraryService {
             if buffer.count >= chunkSize {
                 await handler(buffer)
                 buffer.removeAll(keepingCapacity: true)
+                // Checked here rather than per asset: a cancelled sweep used to keep reading
+                // to the end of the library with nowhere to put what it read.
+                if Task.isCancelled { return }
             }
         }
         if !buffer.isEmpty { await handler(buffer) }

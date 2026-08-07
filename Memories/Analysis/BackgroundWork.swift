@@ -45,17 +45,29 @@ enum BackgroundWork {
     private static func handleAnalysis(_ task: BGProcessingTask, app: AppEnvironment) {
         scheduleAnalysis()   // always queue the next one first
 
-        task.expirationHandler = {
-            app.coordinator.stop()
-            task.setTaskCompleted(success: false)
+        app.startIndexingIfPossible()
+
+        let window = Task { @MainActor in
+            // Hold the window open for as long as the pass needs it rather than for a fixed
+            // handful of seconds. This is the one moment the phone is on power with nobody
+            // looking at it, which is exactly when the expensive stages should be running —
+            // handing the time back after twenty-five seconds meant a large library was
+            // indexed almost entirely in the foreground, on battery, in front of the user.
+            //
+            // `try` rather than `try?`: cancellation has to leave without reporting success,
+            // because the expiration handler has already reported failure.
+            while app.coordinator.isRunning {
+                try await Task.sleep(for: .seconds(2))
+            }
+            task.setTaskCompleted(success: true)
         }
 
-        app.startIndexingIfPossible()
-        Task {
-            // Give it a working window, then hand time back rather than being killed for it.
-            try? await Task.sleep(for: .seconds(25))
-            let finished = !app.coordinator.isRunning
-            task.setTaskCompleted(success: finished)
+        task.expirationHandler = {
+            // The system wants its time back. Cancelling the waiter is what stops completion
+            // being reported twice, which is a crash rather than a mistake.
+            window.cancel()
+            app.coordinator.stop()
+            task.setTaskCompleted(success: false)
         }
     }
 

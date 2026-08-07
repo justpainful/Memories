@@ -48,6 +48,14 @@ enum FaceClustering {
     /// four hundred photographs does not cost four hundred comparisons each time.
     static let maxComparisonsPerPerson = 8
 
+    /// The most people one pass will invent.
+    ///
+    /// Every face is weighed against every group, so an unbounded number of groups makes the
+    /// work grow with the square of the library — and almost all of that growth is spent on
+    /// groups of one, which are thrown away afterwards for being too small to be anybody.
+    /// Past this a face that matches nobody is simply left out.
+    static let maxGroups = 600
+
     /// Groups faces into people. Order in, order out: the same library always produces the
     /// same people, which is what makes the result testable and the screen stable between runs.
     static func cluster(_ faces: [FaceInput]) -> [[FaceInput]] {
@@ -64,6 +72,11 @@ enum FaceClustering {
         var groups: [[FaceInput]] = []
 
         for face in ordered {
+            // This is the longest-running loop in the app, and it runs at the very end of a
+            // pass. Without this, asking it to stop — closing the app, reindexing — waits for
+            // every remaining face.
+            if Task.isCancelled { break }
+
             var best: (index: Int, score: Double)?
             var runnerUp: Double = 0
 
@@ -86,7 +99,7 @@ enum FaceClustering {
 
             if let best, best.score - runnerUp > ambiguityMargin {
                 groups[best.index].append(face)
-            } else {
+            } else if groups.count < maxGroups {
                 groups.append([face])
             }
         }

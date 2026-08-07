@@ -26,8 +26,15 @@ struct FrameAnalysis: Sendable {
 /// the app can promise that nothing leaves the phone.
 enum VisionAnalyzer {
 
-    static func analyze(_ image: UIImage) async -> FrameAnalysis {
-        guard let cgImage = image.cgImage else { return FrameAnalysis() }
+    /// Everything one decoded frame is worth: the measurements that describe the picture, and
+    /// the people found in it.
+    ///
+    /// The two are returned together because they come out of the same requests. Faces used to
+    /// be detected here for the capture-quality number and then detected all over again by the
+    /// caller to crop the people out, which on a large library is an entire second face pass
+    /// over every photograph — by some way the most expensive thing that was being repeated.
+    static func analyze(_ image: UIImage) async -> (analysis: FrameAnalysis, faces: [DetectedFace]) {
+        guard let cgImage = image.cgImage else { return (FrameAnalysis(), []) }
         var result = FrameAnalysis()
 
         // Feature print — the basis for "these are the same shot".
@@ -42,13 +49,11 @@ enum VisionAnalyzer {
         }
 
         // Face capture quality — designed exactly for "which of these near-identical
-        // portraits is the one where their eyes are open and it isn't blurred".
-        if let faces = try? await DetectFaceCaptureQualityRequest().perform(on: cgImage) {
-            result.faceCount = faces.count
-            result.bestFaceQuality = faces.compactMap { $0.captureQuality?.score }
-                .map(Double.init)
-                .max()
-        }
+        // portraits is the one where their eyes are open and it isn't blurred". The same
+        // detection also yields the crops that people grouping is built from.
+        let findings = await FaceAnalyzer.detect(in: cgImage)
+        result.faceCount = findings.count
+        result.bestFaceQuality = findings.bestQuality
 
         // Saliency — what the frame is *of*, and where that thing sits in it.
         if let subject = await salientSubject(in: cgImage) {
@@ -58,7 +63,7 @@ enum VisionAnalyzer {
 
         result.sharpness = sharpness(of: cgImage)
         result.averageColor = AmbientColor.average(of: image) ?? 0
-        return result
+        return (result, findings.faces)
     }
 
     /// The salient region that stands in for the subject: the largest box either saliency
@@ -188,13 +193,25 @@ enum IndexingImageProvider {
                 contentMode: .aspectFit,
                 options: options
             ) { image, info in
+                guard !resumed else { return }
+
+                // A degraded frame is a placeholder for a better one still on its way, so it
+                // is skipped — unless it arrives carrying a cloud flag, an error or a
+                // cancellation, which is Photos saying no better one is coming. Waiting for a
+                // callback that will never arrive strands the continuation, and a stranded
+                // continuation stops the batch, and a stopped batch stops the whole pass.
                 let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                guard !degraded, !resumed else { return }
+                let inCloud = (info?[PHImageResultIsInCloudKey] as? Bool) == true
+                let finished = !degraded
+                    || inCloud
+                    || info?[PHImageErrorKey] != nil
+                    || (info?[PHImageCancelledKey] as? Bool) == true
+                guard finished else { return }
                 resumed = true
 
                 if let image {
                     continuation.resume(returning: .image(image))
-                } else if (info?[PHImageResultIsInCloudKey] as? Bool) == true {
+                } else if inCloud {
                     continuation.resume(returning: .inCloud)
                 } else {
                     continuation.resume(returning: .unavailable)

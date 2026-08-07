@@ -27,6 +27,14 @@ struct PendingAsset: Sendable {
     var needsProvenance: Bool
 }
 
+/// One frame's pixel work, finished and waiting to be written.
+struct AnalyzedFrame: Sendable {
+    var identifier: String
+    var analysis: FrameAnalysis
+    var faces: [DetectedFace]
+    var provenance: AssetProvenance?
+}
+
 /// All database work for indexing, on its own actor with its own context.
 ///
 /// The rule the whole design follows: the library is diffed, never rebuilt. A second launch
@@ -130,6 +138,13 @@ actor LibraryIndexer {
     /// truthful on a pass that saw the whole library. A live change knows exactly what went
     /// and calls `remove(_:)` instead.
     func prune(keeping identifiers: Set<String>) -> Int {
+        // Every identifier the sweep just saw already has a row, so a table holding no more
+        // rows than the sweep saw is describing exactly the same assets and there is nothing
+        // to drop. That is what happens on every launch where the user deleted nothing, and
+        // it is worth checking first: the alternative is reading every row in the library to
+        // find that out.
+        guard totalCount() > identifiers.count else { return 0 }
+
         guard let all = try? modelContext.fetch(FetchDescriptor<AssetRecord>()) else { return 0 }
         var removed = 0
         for record in all where !identifiers.contains(record.localIdentifier) {
@@ -204,10 +219,52 @@ actor LibraryIndexer {
         return try? modelContext.fetch(descriptor).first
     }
 
-    func store(_ analysis: FrameAnalysis,
-               provenance: AssetProvenance? = nil,
-               for identifier: String) {
-        guard let record = record(for: identifier) else { return }
+    /// Write everything one batch of frames produced, in a single transaction.
+    ///
+    /// One asset at a time meant one predicate fetch and one `save()` each, and a save is an
+    /// SQLite transaction that has to reach the flash before it returns. Over a library of
+    /// fifteen thousand that is fifteen thousand of them — most of what a first run spends on
+    /// disk, and disk is not free in battery terms either.
+    func store(_ frames: [AnalyzedFrame], inCloud: [String], unscorable: [String]) {
+        let identifiers = frames.map(\.identifier) + inCloud + unscorable
+        guard !identifiers.isEmpty else { return }
+        let found = records(matching: identifiers)
+
+        var facesByAsset: [String: [DetectedFace]] = [:]
+        for frame in frames {
+            guard let record = found[frame.identifier] else { continue }
+            apply(frame.analysis, provenance: frame.provenance, to: record)
+            facesByAsset[frame.identifier] = frame.faces
+        }
+        PeopleIndexing.store(facesByAsset, in: modelContext)
+
+        // Catalogued, not downloaded. It genuinely cannot be shown offline, so it stays out
+        // of memories until it comes back.
+        for identifier in inCloud {
+            guard let record = found[identifier] else { continue }
+            record.isLocallyAvailable = false
+            record.analysisVersion = currentAnalysisVersion
+        }
+
+        // Present but unreadable this time. It keeps its place in the library — treating a
+        // failed thumbnail request as "not on this device" used to remove the photo from
+        // every memory for good.
+        for identifier in unscorable {
+            guard let record = found[identifier] else { continue }
+            record.analysisVersion = currentAnalysisVersion
+            if record.memoryScore == 0 { record.memoryScore = 0.45 }
+        }
+
+        // A new feature print changes what the groups would come out as, and a bumped
+        // pipeline version is the one way rows become stale without the library moving at
+        // all. Counting it here is what stops that case being skipped as "nothing changed".
+        notePending(LibraryChangeCounts(updated: frames.count))
+        modelContext.saveIfNeeded()
+    }
+
+    private func apply(_ analysis: FrameAnalysis,
+                       provenance: AssetProvenance?,
+                       to record: AssetRecord) {
         record.featurePrint = analysis.featureVector.isEmpty ? nil : analysis.featureVector.data
         record.aestheticsScore = analysis.aesthetics
         record.faceCount = analysis.faceCount
@@ -220,12 +277,6 @@ actor LibraryIndexer {
         record.memoryScore = QualityScorer.score(inputs(for: record, analysis: analysis))
         record.analysisVersion = currentAnalysisVersion
         if let provenance { apply(provenance, to: record) }
-
-        // A new feature print changes what the groups would come out as, and a bumped
-        // pipeline version is the one way rows become stale without the library moving at
-        // all. Counting it here is what stops that case being skipped as "nothing changed".
-        notePending(LibraryChangeCounts(updated: 1))
-        modelContext.saveIfNeeded()
     }
 
     /// Where the file came from, as far as its name and its resources will admit.
@@ -243,39 +294,6 @@ actor LibraryIndexer {
             // the label on the viewer.
             record.refreshMomentDate()
         }
-    }
-
-    // MARK: People
-
-    /// Thin passthroughs so the model context never leaves this actor. The face work itself
-    /// lives in `FaceAnalyzer`, which knows nothing about storage.
-    func storeFaces(_ faces: [DetectedFace], for identifier: String) {
-        PeopleIndexing.store(faces, for: identifier, in: modelContext)
-    }
-
-    /// A whole-library pass, not a per-asset one: who somebody is only emerges from seeing
-    /// every face at once.
-    func rebuildPeople() {
-        PeopleIndexing.rebuildPeople(in: modelContext)
-    }
-
-    /// Mark an asset that Photos would only give us by downloading it. Nothing is downloaded,
-    /// so it keeps its metadata and stops being offered pixel work.
-    func markUnavailable(_ identifier: String) {
-        guard let record = record(for: identifier) else { return }
-        record.isLocallyAvailable = false
-        record.analysisVersion = currentAnalysisVersion
-        modelContext.saveIfNeeded()
-    }
-
-    /// The frame could not be read, but the asset is here. It stops being offered pixel work
-    /// so the queue drains, and keeps a neutral score so it can still appear in a memory —
-    /// unlike an iCloud-only asset, there is nothing stopping it being shown.
-    func markUnscorable(_ identifier: String) {
-        guard let record = record(for: identifier) else { return }
-        record.analysisVersion = currentAnalysisVersion
-        if record.memoryScore == 0 { record.memoryScore = 0.45 }
-        modelContext.saveIfNeeded()
     }
 
     private func inputs(for record: AssetRecord, analysis: FrameAnalysis) -> QualityInputs {
@@ -324,6 +342,24 @@ actor LibraryIndexer {
         )
     }
 
+    /// The same input with the feature print left on disk.
+    ///
+    /// Occasions are grouped by time and place and never by what a frame looks like, so
+    /// unpacking a print for every row — three kilobytes off disk and a 768-wide conversion
+    /// each — buys the event pass nothing at all.
+    private func eventInput(_ record: AssetRecord) -> ClusterInput {
+        ClusterInput(
+            identifier: record.localIdentifier,
+            date: record.momentDate,
+            latitude: record.latitude,
+            longitude: record.longitude,
+            burstIdentifier: record.burstIdentifier,
+            isVideo: record.isVideo,
+            featureVector: nil,
+            memoryScore: record.memoryScore
+        )
+    }
+
     /// Whether anything has happened that the groups on disk do not account for.
     ///
     /// Clustering reads and rewrites every row in the library, so on a launch where nothing
@@ -360,25 +396,29 @@ actor LibraryIndexer {
         modelContext.saveIfNeeded()
     }
 
-    /// Rebuild similarity groups and elect a best shot in each.
-    func rebuildSimilarityClusters() {
-        guard needsClusterRebuild() else { return }
+    /// Rebuild similarity groups, occasions and people from one read of the library.
+    ///
+    /// All three want every row. Reading the table once for each of them was three full
+    /// materialisations of it — and a fourth inside people grouping, which went back for
+    /// nothing but a date per asset.
+    func rebuildGroups() {
         let records = allRecords()
         guard !records.isEmpty else { return }
 
         try? modelContext.delete(model: SimilarityCluster.self)
-        applySimilarity(to: records)
-        modelContext.saveIfNeeded()
-    }
-
-    /// Rebuild occasions from the shape of the shooting itself.
-    func rebuildEvents() {
-        guard needsClusterRebuild() else { return }
-        let records = allRecords()
-        guard !records.isEmpty else { return }
-
         try? modelContext.delete(model: EventCluster.self)
+
+        applySimilarity(to: records)
+        // After similarity, not beside it: similarity rescores every row it touched, and an
+        // occasion's cover and its significance are read off those scores.
         applyEvents(to: records)
+        modelContext.saveIfNeeded()
+
+        // Who somebody is only emerges from seeing every face at once, so this belongs with
+        // the other whole-library passes rather than with any one photo.
+        let moments = Dictionary(records.map { ($0.localIdentifier, $0.momentDate) },
+                                 uniquingKeysWith: { first, _ in first })
+        PeopleIndexing.rebuildPeople(in: modelContext, moments: moments)
         modelContext.saveIfNeeded()
     }
 
@@ -397,8 +437,7 @@ actor LibraryIndexer {
         guard !dates.isEmpty else { return }
 
         guard let ranges = affectedRanges(for: dates) else {
-            rebuildSimilarityClusters()
-            rebuildEvents()
+            rebuildGroups()
             markClustersRebuilt()
             return
         }
@@ -571,7 +610,7 @@ actor LibraryIndexer {
     private func applyEvents(to records: [AssetRecord]) {
         var assignments: [String: UUID] = [:]
 
-        for group in EventClustering.cluster(records.map(clusterInput)) {
+        for group in EventClustering.cluster(records.map(eventInput)) {
             guard let start = group.first?.date, let end = group.last?.date else { continue }
             let event = EventCluster(startDate: start, endDate: end,
                                      assetIdentifiers: group.map(\.identifier))

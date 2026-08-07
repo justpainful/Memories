@@ -13,6 +13,19 @@ struct DetectedFace: Sendable {
     var area: Double { Double(boundingBox.width * boundingBox.height) }
 }
 
+/// What one detection pass over a frame is worth.
+///
+/// Both halves come out of the same request deliberately. Detecting faces is the most
+/// expensive thing Vision is asked for in this pipeline, and it used to be run twice over
+/// every frame — once for the capture-quality number the scorer wants, and again to crop the
+/// people out — which over a large library is a second full pass over every photograph for an
+/// answer that was already in hand.
+struct FaceFindings: Sendable {
+    var count: Int = 0
+    var bestQuality: Double?
+    var faces: [DetectedFace] = []
+}
+
 /// Finds the faces in one already-decoded frame and describes each well enough to group later.
 ///
 /// Vision publishes no face-identity embedding, so identity here is approximated: the face is
@@ -34,29 +47,31 @@ enum FaceAnalyzer {
     /// Below this the crop is a handful of pixels and its print is noise wearing a number.
     static let minimumCropPixels: CGFloat = 24
 
-    /// Convenience for the indexing pipeline, which already holds a decoded `UIImage`.
-    static func faces(in image: UIImage) async -> [DetectedFace] {
-        guard let cgImage = image.cgImage else { return [] }
-        return await faces(in: cgImage)
-    }
-
-    static func faces(in cgImage: CGImage) async -> [DetectedFace] {
-        // Capture quality rather than plain rectangles: it returns the same boxes and answers
-        // "is this a usable look at them" in the same pass, and a second detection pass over
-        // an already-expensive decode would be paid for in heat and battery.
+    /// Everything one frame has to say about the people in it, from a single detection.
+    ///
+    /// Capture quality rather than plain rectangles: it returns the same boxes and answers
+    /// "is this a usable look at them" in the same pass, and a second detection over an
+    /// already-expensive decode is paid for in heat and battery.
+    static func detect(in cgImage: CGImage) async -> FaceFindings {
         guard let observations = try? await DetectFaceCaptureQualityRequest().perform(on: cgImage) else {
-            return []
+            return FaceFindings()
         }
 
-        var found: [DetectedFace] = []
-        found.reserveCapacity(observations.count)
+        var findings = FaceFindings()
+        findings.count = observations.count
+        findings.bestQuality = observations.compactMap { $0.captureQuality?.score }
+            .map(Double.init)
+            .max()
+        findings.faces.reserveCapacity(observations.count)
 
         for observation in observations {
             let box = observation.boundingBox.cgRect
             let quality = Double(observation.captureQuality?.score ?? 0)
 
             // Bystanders and blurred glances are dropped here rather than being stored and
-            // filtered later: a print taken from them would only ever invent people.
+            // filtered later: a print taken from them would only ever invent people. It also
+            // means the per-face print below — a Vision request of its own — is never spent
+            // on a face nothing was ever going to be done with.
             guard Double(box.width * box.height) >= FaceRecord.minimumArea,
                   quality >= FaceRecord.minimumQuality,
                   let crop = squareCrop(of: cgImage, around: box),
@@ -66,11 +81,11 @@ enum FaceAnalyzer {
             let vector = printed.featureVector
             guard !vector.isEmpty else { continue }
 
-            found.append(DetectedFace(boundingBox: box,
-                                      captureQuality: quality,
-                                      featureVector: vector))
+            findings.faces.append(DetectedFace(boundingBox: box,
+                                               captureQuality: quality,
+                                               featureVector: vector))
         }
-        return found
+        return findings
     }
 
     /// A square crop around the face, taken wider than the box Vision drew.
@@ -104,10 +119,7 @@ enum FaceAnalyzer {
 
 // MARK: - Entry point for the indexing pipeline
 
-/// The database side of finding people. Nothing calls this yet.
-///
-/// The face pass is deliberately not wired into `AnalysisCoordinator` here — that file belongs
-/// to another pass of work. Two calls connect it, and both are noted on the functions below.
+/// The database side of finding people.
 enum PeopleIndexing {
 
     /// One appearance is not enough to call somebody a person.
@@ -116,45 +128,71 @@ enum PeopleIndexing {
     /// nothing because it was noisy, than it is somebody worth a tile on the People screen.
     static let minimumFacesPerPerson = 2
 
-    /// Record the faces found in one frame.
+    /// The most faces one grouping pass will consider.
     ///
-    /// **Wiring:** call from `AnalysisCoordinator.runPixels`, immediately after
-    /// `await indexer.store(analysis, for: identifier)`, with the same decoded image.
-    static func store(_ faces: [DetectedFace], for identifier: String, in context: ModelContext) {
+    /// Grouping compares every face against every group it might belong to, so its cost grows
+    /// with the product of the two. Left unbounded on a library of tens of thousands it is by
+    /// some distance the longest piece of arithmetic the app performs, and it lands at the end
+    /// of a pass the user has already waited through. The best captures are the ones kept,
+    /// which is also the half that groups reliably: a face that scored badly was never going
+    /// to be matched to anybody with confidence.
+    static let maxFacesConsidered = 4_000
+
+    /// Record the faces found in a batch of frames.
+    ///
+    /// Batched on purpose, and without a save of its own. The rows to replace are found with
+    /// one query for the whole batch rather than one per photograph, and the caller's single
+    /// transaction covers the writes — a save per asset is a trip to the flash per asset.
+    static func store(_ facesByAsset: [String: [DetectedFace]], in context: ModelContext) {
+        guard !facesByAsset.isEmpty else { return }
+        let identifiers = Array(facesByAsset.keys)
+
         // Replace rather than append. An asset edited in Photos is analysed again, and the
         // rows already on disk describe pixels that no longer exist.
         let descriptor = FetchDescriptor<FaceRecord>(
-            predicate: #Predicate { $0.assetIdentifier == identifier }
+            predicate: #Predicate<FaceRecord> { identifiers.contains($0.assetIdentifier) }
         )
         for stale in (try? context.fetch(descriptor)) ?? [] {
             context.delete(stale)
         }
 
-        for face in faces {
-            let record = FaceRecord(assetIdentifier: identifier)
-            record.boundingX = Double(face.boundingBox.minX)
-            record.boundingY = Double(face.boundingBox.minY)
-            record.boundingWidth = Double(face.boundingBox.width)
-            record.boundingHeight = Double(face.boundingBox.height)
-            record.captureQuality = face.captureQuality
-            record.featurePrint = face.featureVector.data
-            record.analysisVersion = currentAnalysisVersion
-            context.insert(record)
+        for (identifier, faces) in facesByAsset {
+            for face in faces {
+                let record = FaceRecord(assetIdentifier: identifier)
+                record.boundingX = Double(face.boundingBox.minX)
+                record.boundingY = Double(face.boundingBox.minY)
+                record.boundingWidth = Double(face.boundingBox.width)
+                record.boundingHeight = Double(face.boundingBox.height)
+                record.captureQuality = face.captureQuality
+                record.featurePrint = face.featureVector.data
+                record.analysisVersion = currentAnalysisVersion
+                context.insert(record)
+            }
         }
-        context.saveIfNeeded()
     }
 
     /// Group every stored face into people.
     ///
-    /// **Wiring:** call once after the pixel pass, next to `await indexer.rebuildEvents()`.
-    /// It is a whole-library pass, so it belongs beside the other rebuilds rather than inside
-    /// the per-asset loop.
-    static func rebuildPeople(in context: ModelContext) {
+    /// A whole-library pass, so it belongs beside the other rebuilds rather than inside the
+    /// per-asset loop. `moments` is handed in rather than fetched because the caller has just
+    /// read every row for the other rebuilds, and reading them again for one date each would
+    /// be a second materialisation of the whole table.
+    static func rebuildPeople(in context: ModelContext, moments: [String: Date]) {
         guard let faces = try? context.fetch(FetchDescriptor<FaceRecord>()) else { return }
         let facesByID = Dictionary(faces.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
+        // Best captures first, then the cut: what is dropped is the blurred tail, which would
+        // have gone on to match nobody at the thresholds `FaceClustering` holds anyway.
+        let considered = faces
+            .compactMap(input(from:))
+            .sorted { lhs, rhs in
+                if abs(lhs.quality - rhs.quality) > 0.0001 { return lhs.quality > rhs.quality }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            .prefix(maxFacesConsidered)
+
         let groups = FaceClustering
-            .cluster(faces.compactMap(input(from:)))
+            .cluster(Array(considered))
             .filter { $0.count >= minimumFacesPerPerson }
 
         // Who each face used to belong to, read before the assignments are cleared.
@@ -168,7 +206,6 @@ enum PeopleIndexing {
             ((try? context.fetch(FetchDescriptor<PersonRecord>())) ?? []).map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let moments = momentDates(in: context)
 
         for group in groups {
             // Grouping is redone from scratch on every pass, so without this a person the
@@ -238,13 +275,5 @@ enum PeopleIndexing {
         let dates = identifiers.compactMap { moments[$0] }
         person.firstSeen = dates.min() ?? .distantPast
         person.lastSeen = dates.max() ?? .distantPast
-    }
-
-    /// When each asset actually happened, preferring a recovered capture date, so a person's
-    /// span reads as the years you knew them rather than the day the files arrived.
-    private static func momentDates(in context: ModelContext) -> [String: Date] {
-        guard let records = try? context.fetch(FetchDescriptor<AssetRecord>()) else { return [:] }
-        return Dictionary(records.map { ($0.localIdentifier, $0.momentDate) },
-                          uniquingKeysWith: { first, _ in first })
     }
 }

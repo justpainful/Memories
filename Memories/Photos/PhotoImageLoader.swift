@@ -81,6 +81,13 @@ final class PhotoImageLoader {
     func image(forIdentifier identifier: String,
                targetSize: CGSize,
                purpose: ImagePurpose = .browsing) async -> UIImage? {
+        // Answered from the cache before the asset is looked up at all. Fetching the `PHAsset`
+        // first meant every tile that scrolled back into view paid for a synchronous query
+        // against the Photos database, on the main thread, only to be handed something that
+        // was already in memory — and a grid the length of this one scrolls back constantly.
+        if let cached = cache.object(forKey: Self.cacheKey(identifier, targetSize, purpose)) {
+            return cached
+        }
         guard let asset = PhotoLibraryService.asset(for: identifier) else { return nil }
         return await image(for: asset, targetSize: targetSize, purpose: purpose)
     }
