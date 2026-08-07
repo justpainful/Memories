@@ -51,12 +51,19 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee test.log | tail -n 40
 
+      # To stdout as well as the summary. A compile error in a test target reports its file
+      # and line in the full log and only its message in the tail, which is the half that is
+      # no use for fixing it.
       - name: Report failures
         if: failure()
         run: |
+          echo "--- errors ---"
+          grep -E "error:" test.log | sort -u | head -n 60 || true
+          echo "--- failing expectations ---"
+          grep -E "(recorded an issue|Expectation failed)" test.log | sort -u | head -n 60 || true
           {
             echo "## Failing tests"
             echo '```'
-            grep -E "(error:|XCTAssert|#expect|failed)" test.log | sort -u | head -n 60
+            grep -E "(error:|recorded an issue|Expectation failed)" test.log | sort -u | head -n 60
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
