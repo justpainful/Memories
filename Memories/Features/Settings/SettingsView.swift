@@ -70,7 +70,7 @@ struct SettingsView: View {
                 ))
             }
 
-            Section("Appearance") {
+            Section {
                 Picker("Appearance", selection: Binding(
                     get: { app.settings.appearance },
                     set: { app.settings.appearance = $0 }
@@ -80,6 +80,22 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+
+                // Labelled rather than segmented: "System" and "Editorial" do not explain
+                // themselves the way "Light" and "Dark" do, and two unlabelled segmented
+                // controls in one section would be a guess.
+                Picker("Typography", selection: Binding(
+                    get: { app.settings.typography },
+                    set: { app.settings.typography = $0 }
+                )) {
+                    ForEach(TypographyStyle.allCases, id: \.self) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("System sets every word in SF Pro, the iPhone's own typeface. Editorial sets memory titles, section headings and the date above the feed in New York, a serif; buttons, counts and settings stay in SF Pro either way.")
             }
 
             Section {

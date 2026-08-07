@@ -270,10 +270,12 @@ def _movie_atom(sizes: list[int], first_offset: int, width: int, height: int,
         mdia,
     )
 
-    # Two places carry the date, and the app reads them in this order: AVAsset's own
-    # `.creationDate`, which comes from the `©day` user-data atom, then the QuickTime
-    # metadata key. Writing only the latter on one clip is what puts the second branch of
-    # `ProvenanceReader.recordingDate(of:)` under test.
+    # Two places can carry the date, and `ProvenanceReader.recordingDate(of:)` tries them in
+    # this order: AVAsset's own `.creationDate`, which reads the `©day` user-data atom, then
+    # the `com.apple.quicktime.creationdate` metadata key. One clip is written with the key
+    # and no `©day`, so a file exists that only the second lookup can date — though
+    # AVFoundation also maps that key onto the common creation-date, so it may well be the
+    # first branch that answers. Either way the date is recovered from the container.
     user_data: list[bytes] = []
     if recorded and metadata_style != "mdta":
         user_data.append(_text_atom(b"\xa9day", _iso8601(recorded)))
@@ -471,7 +473,7 @@ def build(today: dt.date, count: int, rnd: random.Random) -> Library:
         back = rnd.randint(1, 6 * 365)
         when = dt.datetime.combine(today - dt.timedelta(days=back),
                                    dt.time(rnd.randint(7, 22), rnd.randint(0, 59)))
-        anonymous = index % 5 == 4
+        anonymous = index % 3 == 2
         shots.append(Shot(
             when, rnd.randint(0, 9999),
             name=f"image_{1_690_000_000 + index * 8641}.jpeg" if anonymous else None,

@@ -25,6 +25,15 @@ final class AppSettings {
     // Appearance
     var appearance: AppearanceChoice { didSet { store(appearance.rawValue, "appearance") } }
 
+    /// The one preference this object does not store itself. `Typo` has to read the choice
+    /// from static context, where no `AppSettings` instance is in reach, so it lives in
+    /// `TypographyPreference` and this is a window onto it — read and written here exactly
+    /// like the rest.
+    var typography: TypographyStyle {
+        get { TypographyPreference.shared.style }
+        set { TypographyPreference.shared.style = newValue }
+    }
+
     private let defaults = UserDefaults.standard
 
     init() {
@@ -78,6 +87,50 @@ enum AppearanceChoice: String, CaseIterable, Sendable {
         case .light:  return "Light"
         case .dark:   return "Dark"
         }
+    }
+}
+
+/// Which typeface carries the editorial layer — memory titles, section headlines, the date
+/// that opens the feed. Controls, counts and metadata are SF Pro under either choice.
+enum TypographyStyle: String, CaseIterable, Sendable {
+    case system, editorial
+
+    var title: String {
+        switch self {
+        case .system:    return "System"
+        case .editorial: return "Editorial"
+        }
+    }
+
+    var design: Font.Design {
+        switch self {
+        case .system:    return .default
+        case .editorial: return .serif
+        }
+    }
+}
+
+/// The typography choice, held once for the whole app.
+///
+/// It is deliberately not stored on `AppSettings`: `Typo` is a plain enum of statics read
+/// from dozens of view bodies that never see an `AppSettings`, and there can be more than one
+/// `AppSettings` alive (previews get their own `AppEnvironment`), so a per-instance property
+/// would leave some readers observing an object nobody is writing to.
+///
+/// Not `@MainActor` either. Isolating it would isolate every `Typo` constant that reads it,
+/// and those are read from `View` extensions and other places that carry no isolation of
+/// their own. Writes only ever come from the Settings picker, on the main thread.
+@Observable
+final class TypographyPreference {
+    nonisolated(unsafe) static let shared = TypographyPreference()
+
+    var style: TypographyStyle { didSet { UserDefaults.standard.set(style.rawValue, forKey: "typography") } }
+
+    private init() {
+        // SF Pro is the default: matching the system typeface is what makes the app read as
+        // part of iOS rather than as a visitor.
+        style = TypographyStyle(rawValue: UserDefaults.standard.string(forKey: "typography") ?? "")
+            ?? .system
     }
 }
 

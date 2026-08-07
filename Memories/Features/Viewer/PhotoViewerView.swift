@@ -29,6 +29,7 @@ struct PhotoViewerView: View {
     @State private var dayWindow: TimeWindow?
     @State private var isSaving = false
     @State private var confirmationText: String?
+    @State private var zoom = ViewerZoom()
 
     init(identifiers: [String], startAt: String) {
         self.identifiers = identifiers
@@ -45,6 +46,7 @@ struct PhotoViewerView: View {
                     ViewerPage(identifier: identifier,
                                isCurrent: identifier == current,
                                showControls: showControls,
+                               zoom: identifier == current ? $zoom : .constant(ViewerZoom()),
                                onSurfaceTap: { toggleControls() })
                         .tag(identifier)
                 }
@@ -52,12 +54,16 @@ struct PhotoViewerView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
             .onTapGesture { toggleControls() }
-            .simultaneousGesture(revealDetails)
+            .simultaneousGesture(revealDetails, including: zoom.isZoomed ? .subviews : .all)
 
             if showControls {
                 VStack {
                     topBar
                     Spacer()
+                    // Scrubbing along the strip is how you cross a long memory without
+                    // flicking through it one photograph at a time.
+                    ViewerFilmstrip(identifiers: identifiers, current: $current)
+                        .padding(.bottom, Space.s)
                     bottomCluster
                 }
                 .transition(.opacity)
@@ -74,10 +80,15 @@ struct PhotoViewerView: View {
             }
         }
         .statusBarHidden(!showControls)
+        // The zoom transition brings a pull-to-dismiss of its own with it. That is welcome at
+        // fit scale, but while the photograph is enlarged a downward drag means panning, and
+        // the presentation would otherwise take the gesture away mid-pan.
+        .interactiveDismissDisabled(zoom.isZoomed)
         .animation(.smooth(duration: 0.28), value: showControls)
         .animation(.smooth(duration: 0.25), value: confirmationText)
         .onAppear { scheduleHide() }
         .onChange(of: current) { _, _ in
+            zoom = ViewerZoom()
             app.feedback.recordAssetSeen([current])
             scheduleHide()
         }
@@ -133,6 +144,10 @@ struct PhotoViewerView: View {
     /// never claims the touch while the finger is down, and decides only once the finger
     /// lifts, and only when the movement was clearly vertical. A horizontal flick still turns
     /// the page, and a tap never travels far enough to reach here.
+    ///
+    /// A third gesture wants it once the photograph is enlarged: panning. Being simultaneous,
+    /// this one would fire on top of the pan and throw the picture away as the user pushed it
+    /// down, so the caller masks it off for as long as the zoom is held.
     private var revealDetails: some Gesture {
         DragGesture(minimumDistance: 24)
             .onEnded { value in
@@ -322,6 +337,23 @@ struct PhotoViewerView: View {
     }
 }
 
+// MARK: - Zoom
+
+/// How far into the still on screen the viewer is currently zoomed.
+///
+/// This is held by the viewer rather than by the page that draws it, because the two things
+/// that most need to know about it live outside the picture: the pager, which has to stop
+/// paging while a photograph is enlarged, and the vertical drag, which has to stop meaning
+/// "leave" while it means "pan". It is cleared when a different photograph arrives.
+struct ViewerZoom: Equatable {
+    var scale: CGFloat = 1
+    var offset: CGSize = .zero
+
+    /// A hair above fit, so a pinch that lands back where it started does not leave the pager
+    /// switched off.
+    var isZoomed: Bool { scale > 1.01 }
+}
+
 // MARK: - One page
 
 /// Draws whichever kind of asset this is, natively: a still, a real Live Photo, or a video.
@@ -329,6 +361,7 @@ private struct ViewerPage: View {
     let identifier: String
     let isCurrent: Bool
     let showControls: Bool
+    @Binding var zoom: ViewerZoom
     let onSurfaceTap: () -> Void
 
     @Environment(\.app) private var app
@@ -348,10 +381,7 @@ private struct ViewerPage: View {
                 } else if let livePhoto {
                     LivePhotoView(livePhoto: livePhoto, isPlaying: isCurrent && app.settings.playLivePhotos)
                 } else {
-                    PhotoImageView(identifier: identifier,
-                                   targetSide: proxy.size.width,
-                                   purpose: .display,
-                                   contentMode: .fit)
+                    ZoomableStill(identifier: identifier, size: proxy.size, zoom: $zoom)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
@@ -372,6 +402,133 @@ private struct ViewerPage: View {
         } else if record.isLivePhoto, app.settings.playLivePhotos {
             let size = CGSize(width: 1600, height: 1600)
             livePhoto = await PhotoImageLoader.shared.livePhoto(for: asset, targetSize: size)
+        }
+    }
+}
+
+/// A still you can pinch and double tap into, the first thing anyone tries on a photograph.
+///
+/// Only stills get this. A video has its own controls under the finger and a Live Photo is
+/// played by `PHLivePhotoView`, which owns its own touches.
+///
+/// Three gestures already run on this touch — the pager underneath, the tap that toggles the
+/// controls, and the viewer's vertical drag — so nothing here is allowed to claim a touch it
+/// does not need. The pan is masked out entirely at fit scale, which leaves the pager exactly
+/// as it was; it only comes alive once the picture is bigger than the screen, and from then
+/// on it wins the horizontal drag because it sits below the pager in the hierarchy. The pinch
+/// is simultaneous so that a second finger never has to fight the pan for the touch.
+private struct ZoomableStill: View {
+    let identifier: String
+    let size: CGSize
+    @Binding var zoom: ViewerZoom
+
+    /// Where the picture stood when the gesture now running began. Both gestures report a
+    /// total measured from their own start, so without a fixed base every event would
+    /// compound on the one before it.
+    @State private var pinchBase: ViewerZoom?
+    @State private var panBase: PanBase?
+
+    private struct PanBase {
+        let offset: CGSize
+        let translation: CGSize
+    }
+
+    private let maxScale: CGFloat = 6
+    private let tapScale: CGFloat = 3
+
+    var body: some View {
+        PhotoImageView(identifier: identifier,
+                       targetSide: size.width,
+                       purpose: .display,
+                       contentMode: .fit)
+            .scaleEffect(zoom.scale)
+            .offset(zoom.offset)
+            .frame(width: size.width, height: size.height)
+            // The gestures hang off the untransformed page-sized frame rather than off the
+            // picture, so a tap reports where it landed in the same coordinates the offsets
+            // are written in, however far the picture has been pushed.
+            .contentShape(.rect)
+            .onTapGesture(count: 2, coordinateSpace: .local) { location in toggleZoom(at: location) }
+            .gesture(pan, including: zoom.isZoomed ? .all : .subviews)
+            .simultaneousGesture(pinch)
+    }
+
+    // MARK: Gestures
+
+    private var pinch: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let base = pinchBase ?? zoom
+                pinchBase = base
+                // Dropping the pan's base every frame is what keeps a second finger from
+                // dragging the picture around underneath the pinch: the pan re-measures from
+                // where things already are and so contributes nothing until the pinch ends.
+                panBase = nil
+
+                // Under fit is allowed while the fingers are down so the picture gives a
+                // little; `settle` takes it back on release.
+                let scale = min(max(base.scale * value.magnification, 0.6), maxScale)
+                zoom = ViewerZoom(scale: scale, offset: anchored(value.startAnchor, from: base, to: scale))
+            }
+            .onEnded { _ in
+                pinchBase = nil
+                settle()
+            }
+    }
+
+    /// A distance rather than nothing, so a still finger is read as a tap and never as a pan.
+    private var pan: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                let base = panBase ?? PanBase(offset: zoom.offset, translation: value.translation)
+                panBase = base
+                let moved = CGSize(width: base.offset.width + value.translation.width - base.translation.width,
+                                   height: base.offset.height + value.translation.height - base.translation.height)
+                zoom.offset = bounded(moved, at: zoom.scale)
+            }
+            .onEnded { _ in panBase = nil }
+    }
+
+    private func toggleZoom(at location: CGPoint) {
+        Haptics.impact(.light)
+        withAnimation(.smooth(duration: 0.28)) {
+            guard !zoom.isZoomed else {
+                zoom = ViewerZoom()
+                return
+            }
+            let fromCentre = CGSize(width: location.x - size.width / 2, height: location.y - size.height / 2)
+            let centred = CGSize(width: -fromCentre.width * tapScale, height: -fromCentre.height * tapScale)
+            zoom = ViewerZoom(scale: tapScale, offset: bounded(centred, at: tapScale))
+        }
+    }
+
+    // MARK: Arithmetic
+
+    /// Keeps the point the fingers started on under the fingers, so the picture grows out of
+    /// where it was grabbed rather than out of its middle.
+    private func anchored(_ anchor: UnitPoint, from base: ViewerZoom, to scale: CGFloat) -> CGSize {
+        let x = (anchor.x - 0.5) * size.width
+        let y = (anchor.y - 0.5) * size.height
+        return bounded(CGSize(width: base.offset.width + x * (base.scale - scale),
+                              height: base.offset.height + y * (base.scale - scale)),
+                       at: scale)
+    }
+
+    /// Stops the picture being pushed out from under the finger. The slack is measured from
+    /// the page rather than from the photograph because the photograph's own proportions are
+    /// not known here; at fit scale there is none, and past it there is more the further in
+    /// you go.
+    private func bounded(_ offset: CGSize, at scale: CGFloat) -> CGSize {
+        let slackX = max(0, size.width * (scale - 1) / 2)
+        let slackY = max(0, size.height * (scale - 1) / 2)
+        return CGSize(width: min(max(offset.width, -slackX), slackX),
+                      height: min(max(offset.height, -slackY), slackY))
+    }
+
+    private func settle() {
+        let scale = min(max(zoom.scale, 1), maxScale)
+        withAnimation(.smooth(duration: 0.24)) {
+            zoom = ViewerZoom(scale: scale, offset: scale > 1 ? bounded(zoom.offset, at: scale) : .zero)
         }
     }
 }

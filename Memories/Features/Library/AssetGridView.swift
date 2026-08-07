@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 /// The square grid used by every "show me these photos" screen.
 ///
@@ -13,23 +14,77 @@ struct AssetGridView: View {
     /// Extra control shown on each tile, e.g. Restore on the Hidden screen.
     var trailingAction: ((AssetRecord) -> AnyView)?
 
+    @Environment(\.app) private var app
+    /// Ties a tile to the photograph it opens, so the thumbnail grows into the full screen and
+    /// shrinks back into itself instead of the viewer sliding up out of the bottom edge.
+    @Namespace private var opening
     @State private var viewing: String?
-    private let columns = [GridItem(.adaptive(minimum: 108), spacing: 4)]
+    @State private var similarFor: String?
+    @State private var savingFor: String?
+    @State private var shareImage: UIImage?
+    @State private var selection = PhotoSelection()
 
     var body: some View {
         Group {
             if records.isEmpty {
                 QuietStatusView(title: emptyTitle, detail: emptyDetail, symbol: emptySymbol)
             } else {
-                LazyVGrid(columns: columns, spacing: 4) {
+                PhotoGrid {
                     ForEach(records, id: \.localIdentifier) { record in
-                        Button { viewing = record.localIdentifier } label: {
+                        Button {
+                            // While selecting, a tap picks rather than opens — the same tile,
+                            // two meanings, which is how Photos does it too.
+                            if selection.isActive {
+                                selection.toggle(record.localIdentifier)
+                            } else {
+                                viewing = record.localIdentifier
+                            }
+                        } label: {
                             tile(record)
+                                .selectionOverlay(
+                                    isSelecting: selection.isActive,
+                                    isSelected: selection.contains(record.localIdentifier),
+                                    cornerRadius: 6
+                                )
                         }
                         .buttonStyle(.plain)
+                        // Holding a tile to reach its menu would fight picking it, so the menu
+                        // steps aside for as long as selection is running.
+                        .contextMenu(menuItems: {
+                            if !selection.isActive { actions(for: record) }
+                        }, preview: {
+                            preview(record)
+                        })
+                        .matchedTransitionSource(id: record.localIdentifier, in: opening)
                     }
                 }
-                .padding(4)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if selection.isActive {
+                SelectionActionBar(selection: selection)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.smooth(duration: 0.3), value: selection.isActive)
+        .toolbar {
+            if !records.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(selection.isActive ? "Done" : "Select") {
+                        if selection.isActive { selection.end() } else { selection.begin() }
+                        Haptics.selection()
+                    }
+                }
+                // The count replaces the title only while selecting. Setting `navigationTitle`
+                // here instead would mean owning it always, and this view does not know what
+                // the screen around it is called.
+                if selection.isActive {
+                    ToolbarItem(placement: .principal) {
+                        Text(selection.title)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Palette.textPrimary)
+                    }
+                }
             }
         }
         .fullScreenCover(item: Binding(
@@ -37,6 +92,29 @@ struct AssetGridView: View {
             set: { viewing = $0?.identifier }
         )) { request in
             PhotoViewerView(identifiers: records.map(\.localIdentifier), startAt: request.identifier)
+                .navigationTransition(.zoom(sourceID: request.identifier, in: opening))
+        }
+        .sheet(item: Binding(
+            get: { similarFor.map(ViewerRequest.init(identifier:)) },
+            set: { similarFor = $0?.identifier }
+        )) { request in
+            SimilarPhotosView(identifier: request.identifier)
+        }
+        .sheet(item: Binding(
+            get: { savingFor.map(ViewerRequest.init(identifier:)) },
+            set: { savingFor = $0?.identifier }
+        )) { request in
+            AddToCollectionSheet(
+                items: [CollectionItem(kind: .asset, reference: request.identifier)],
+                suggestedCover: request.identifier
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(item: Binding(
+            get: { shareImage.map(SharePayload.init(image:)) },
+            set: { shareImage = $0?.image }
+        )) { payload in
+            ShareSheet(items: [payload.image])
         }
     }
 
@@ -60,6 +138,76 @@ struct AssetGridView: View {
                         .padding(5)
                 }
             }
+    }
+
+    // MARK: Holding a thumbnail
+
+    /// The same actions the viewer's ••• menu offers, minus the ones that only mean something
+    /// once the photograph is open. Holding a tile in Photos is how people reach these; making
+    /// them open the picture first to love or hide it is a step Photos does not ask for.
+    @ViewBuilder
+    private func actions(for record: AssetRecord) -> some View {
+        Button(record.isLoved ? "Remove from loved" : "Love",
+               systemImage: record.isLoved ? "heart.slash" : "heart") {
+            toggleLoved(record)
+        }
+        Button("Share", systemImage: "square.and.arrow.up") {
+            Task { await prepareShare(record) }
+        }
+        Button("Save to a collection", systemImage: "plus.rectangle.on.folder") {
+            savingFor = record.localIdentifier
+        }
+        Divider()
+        Button("Show Similar Photos", systemImage: "square.stack.3d.down.right") {
+            similarFor = record.localIdentifier
+        }
+        // On the Hidden screen every photograph is already out, and an action that changes
+        // nothing is worse than an action that is absent.
+        if !record.excludedFromMemories {
+            Divider()
+            Button("Hide from Memories", systemImage: "eye.slash", role: .destructive) {
+                hide(record)
+            }
+        }
+    }
+
+    /// The photograph itself, larger. A preview showing anything else would be answering a
+    /// question nobody asked by holding a picture.
+    ///
+    /// `PhotoImageView` fills whatever it is given and has no size of its own, so the frame
+    /// has to carry the shape of the photograph — otherwise every preview comes out square,
+    /// which is exactly what the thumbnail already was. The ratio is clamped so a panorama
+    /// or a very tall portrait cannot produce a preview the screen has no room for.
+    private func preview(_ record: AssetRecord) -> some View {
+        let width: CGFloat = 320
+        let ratio = CGFloat(min(max(record.aspectRatio, 0.6), 2.2))
+        return PhotoImageView(identifier: record.localIdentifier,
+                              targetSide: width * 2,
+                              purpose: .display,
+                              contentMode: .fit)
+            .frame(width: width, height: width / ratio)
+    }
+
+    private func toggleLoved(_ record: AssetRecord) {
+        app.feedback.setLoved(!record.isLoved, identifier: record.localIdentifier)
+        Haptics.impact(.light)
+    }
+
+    /// Hidden from Memories, not deleted. The photo stays exactly where it is in Photos.
+    private func hide(_ record: AssetRecord) {
+        app.feedback.setHiddenFromMemories(true, identifier: record.localIdentifier)
+        Haptics.impact()
+    }
+
+    /// The share sheet needs the real image, not the thumbnail already on screen, so this
+    /// waits for a full-size load. If the original cannot be fetched — an iCloud asset with
+    /// no network — nothing opens, which is quieter than a share sheet holding a blank.
+    private func prepareShare(_ record: AssetRecord) async {
+        shareImage = await PhotoImageLoader.shared.image(
+            forIdentifier: record.localIdentifier,
+            targetSize: CGSize(width: 2048, height: 2048),
+            purpose: .display
+        )
     }
 }
 

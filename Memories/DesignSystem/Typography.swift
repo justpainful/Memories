@@ -1,18 +1,29 @@
 import SwiftUI
 
-/// Two families, strictly separated.
+/// Two roles, strictly separated.
 ///
-/// New York (`.serif`) is the *editorial* voice — memory titles, section headlines, the date
-/// that opens the feed. It is what makes the app read as a personal magazine instead of a
-/// file browser. SF Pro is the *functional* voice — controls, counts, metadata, settings.
-/// They never mix inside a single line.
+/// The *editorial* voice — memory titles, section headlines, the date that opens the feed —
+/// is the one the user chooses between: SF Pro, so the app reads as part of iOS, or New York
+/// (`.serif`), so it reads as a personal magazine. The *functional* voice — controls, counts,
+/// metadata, settings — is SF Pro under either choice. They never mix inside a single line.
+///
+/// The editorial constants are computed `static var`s that read `TypographyPreference`, and
+/// that shape is the whole point. Two things had to hold at once: `Typo.memoryTitle` and the
+/// rest are written the same way in dozens of views and could not change, and the switch had
+/// to take effect while the user is looking at it. Reading `UserDefaults` here on each access
+/// would satisfy the first and give the right *value*, but nothing would ask SwiftUI to run
+/// those bodies again — almost none of the views that set editorial type ever touch
+/// `AppSettings`, so they would keep their old fonts until relaunch. Reading an `@Observable`
+/// property does both: the read happens inside the calling view's body, which registers that
+/// body as an observer of the choice, so changing the picker invalidates exactly the views
+/// that use editorial type and nothing else.
 enum Typo {
-    // Editorial — New York
-    static func hero(_ size: CGFloat = 34) -> Font { .system(size: size, weight: .semibold, design: .serif) }
-    static let memoryTitle   = Font.system(size: 28, weight: .semibold, design: .serif)
-    static let sectionTitle  = Font.system(size: 22, weight: .semibold, design: .serif)
-    static let dateHeadline  = Font.system(size: 26, weight: .regular, design: .serif)
-    static let quiet         = Font.system(size: 17, weight: .regular, design: .serif)
+    // Editorial — SF Pro or New York, per `AppSettings.typography`
+    static func hero(_ size: CGFloat = 34) -> Font { editorial(size, .semibold) }
+    static var memoryTitle: Font  { editorial(28, .semibold) }
+    static var sectionTitle: Font { editorial(22, .semibold) }
+    static var dateHeadline: Font { editorial(26, .regular) }
+    static var quiet: Font        { editorial(17, .regular) }
 
     // Functional — SF Pro
     static let control       = Font.system(size: 16, weight: .medium)
@@ -20,6 +31,10 @@ enum Typo {
     static let meta          = Font.system(size: 13, weight: .regular)
     static let overline      = Font.system(size: 12, weight: .semibold)
     static let tabLabel      = Font.system(size: 11, weight: .medium)
+
+    private static func editorial(_ size: CGFloat, _ weight: Font.Weight) -> Font {
+        .system(size: size, weight: weight, design: TypographyPreference.shared.style.design)
+    }
 }
 
 extension View {

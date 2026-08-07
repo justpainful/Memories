@@ -57,11 +57,43 @@ jobs:
           # The runner's python is externally managed (PEP 668), so pip needs its own venv.
           python3 -m venv /tmp/seedenv
           /tmp/seedenv/bin/pip install --quiet --disable-pip-version-check Pillow piexif
-          # simctl addmedia costs seconds per asset, so the fixture is just big enough to
-          # exercise anniversaries, one dense evening and one burst of near-duplicates.
-          /tmp/seedenv/bin/python Scripts/make_seed_photos.py --out /tmp/seed --count 46
-          xcrun simctl addmedia "${{ steps.sim.outputs.udid }}" /tmp/seed/*.jpg
-          echo "seeded $(ls /tmp/seed/*.jpg | wc -l) assets"
+
+          # The fixture includes short video clips. The macOS runner image ships no ffmpeg and
+          # `brew install ffmpeg` costs minutes on a lane that runs in ten, so the seed script
+          # writes Motion JPEG QuickTime files itself out of Pillow frames — nothing to
+          # install. This line only records which tool was actually available.
+          if command -v ffmpeg >/dev/null 2>&1; then
+            echo "ffmpeg is present but not used; clips come from Scripts/make_seed_photos.py"
+          else
+            echo "no ffmpeg on this runner, as expected; clips come from Scripts/make_seed_photos.py"
+          fi
+
+          # simctl addmedia costs seconds per asset, so the fixture is kept just big enough to
+          # exercise anniversaries, a dense evening, a burst of near-duplicates, three GPS
+          # clusters (one far enough away to read as a trip), messaging-app filenames and a
+          # handful of videos whose container date disagrees with their file date.
+          /tmp/seedenv/bin/python Scripts/make_seed_photos.py --out /tmp/seed --count 60
+
+          # Split by extension rather than globbing `*.jpg`: the stills are deliberately named
+          # the way a camera roll names them (IMG_0042.JPG) and the clips are .MOV, so a
+          # single lowercase glob would silently seed a fraction of the fixture.
+          photos=(); videos=()
+          for file in /tmp/seed/*; do
+            case "${file##*.}" in
+              mov|MOV|mp4|MP4) videos+=("$file") ;;
+              *)               photos+=("$file") ;;
+            esac
+          done
+
+          udid="${{ steps.sim.outputs.udid }}"
+          xcrun simctl addmedia "$udid" "${photos[@]}"
+          # Videos go in separately and non-fatally. A clip Photos refuses to import must not
+          # cost the run every screenshot after it — but it must be loud, because a silent
+          # failure here would leave the video surfaces untested while CI still went green.
+          if ! xcrun simctl addmedia "$udid" "${videos[@]}"; then
+            echo "::warning::simctl refused one or more seed videos; the video badge, the player and the recording-date recovery are untested in this run"
+          fi
+          echo "seeded ${#photos[@]} photos and ${#videos[@]} videos"
 
       - name: Run the UI tour
         run: |

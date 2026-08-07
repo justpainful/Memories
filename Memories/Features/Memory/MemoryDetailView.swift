@@ -7,6 +7,9 @@ struct MemoryDetailView: View {
     let candidate: MemoryCandidate
 
     @Environment(\.app) private var app
+    /// Ties a tile to the photograph it opens, so the thumbnail grows into the full screen and
+    /// shrinks back into itself instead of the viewer sliding up out of the bottom edge.
+    @Namespace private var opening
     @State private var mode: CurationMode = .smart
     @State private var records: [AssetRecord] = []
     @State private var viewerStart: String?
@@ -42,6 +45,7 @@ struct MemoryDetailView: View {
                                 gridTile(record)
                             }
                             .buttonStyle(.plain)
+                            .matchedTransitionSource(id: record.localIdentifier, in: opening)
                         }
                     }
                     .padding(.horizontal, 4)
@@ -89,6 +93,7 @@ struct MemoryDetailView: View {
         )) { request in
             PhotoViewerView(identifiers: records.map(\.localIdentifier),
                             startAt: request.identifier)
+                .navigationTransition(.zoom(sourceID: request.identifier, in: opening))
         }
         .sheet(isPresented: $isSaving) {
             // A whole memory is kept as a memory, not exploded into loose files, plus its
