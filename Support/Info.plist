@@ -25,7 +25,9 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 
-	<!-- Photos. Read-only, on-device. Memories never writes to or uploads from the library. -->
+	<!-- Photos. On-device, and never uploaded. The one thing written back is the favourite
+	     flag behind the heart, so that loving a photo here means the same as loving it in
+	     Photos; read-write access exists for that and nothing else. -->
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Memories reads your library on this iPhone to find and organize your memories. Photos are analyzed on device and are never uploaded.</string>
 

@@ -31,6 +31,16 @@ struct PhotoViewerView: View {
     @State private var confirmationText: String?
     @State private var zoom = ViewerZoom()
 
+    /// What the heart is showing while the tap is still in flight, and `nil` whenever it is
+    /// simply showing what is stored.
+    ///
+    /// Loving a photograph has to reach the Photos library, which takes a moment and can be
+    /// refused, so the icon cannot wait for it — but it also must not lie about it. This is
+    /// set the instant the finger lands and put back if the library says no. Keeping it apart
+    /// from the stored value is also what stops the picture arriving with the previous
+    /// photograph's heart still lit.
+    @State private var lovedOverride: Bool?
+
     init(identifiers: [String], startAt: String) {
         self.identifiers = identifiers
         self.startAt = startAt
@@ -89,9 +99,14 @@ struct PhotoViewerView: View {
         .onAppear { scheduleHide() }
         .onChange(of: current) { _, _ in
             zoom = ViewerZoom()
+            lovedOverride = nil
             app.feedback.recordAssetSeen([current])
             scheduleHide()
         }
+        // Off the main actor and cancelled when the page turns, because scrubbing the
+        // filmstrip changes `current` many times a second and each of these is a hit on the
+        // Photos database.
+        .task(id: current) { await reconcileLoved() }
         .sheet(isPresented: $showDetails) {
             AssetDetailsView(identifier: current)
                 .presentationDetents([.medium, .large])
@@ -197,7 +212,10 @@ struct PhotoViewerView: View {
                 }
 
                 Menu {
-                    Button("Show in Photos", systemImage: "photo.on.rectangle.angled") { openPhotos() }
+                    // "Open Photos", not "Show in Photos": see `openPhotos()`. iOS cannot be
+                    // asked to land on one asset, and a button that promises it and delivers
+                    // the app's front page is a button that does not work.
+                    Button("Open Photos", systemImage: "photo.on.rectangle.angled") { openPhotos() }
                     Button("Share", systemImage: "square.and.arrow.up") { Task { await prepareShare() } }
                     Button("Save to a collection", systemImage: "plus.rectangle.on.folder") {
                         isSaving = true
@@ -235,7 +253,18 @@ struct PhotoViewerView: View {
         LibraryQuery.records(for: [current], context: app.container.mainContext).first
     }
 
-    private var isLoved: Bool { record?.isLoved ?? false }
+    /// Filled when either flag is set.
+    ///
+    /// `isLoved` is this app's own signal and `isFavoriteInPhotos` mirrors the asset, and the
+    /// two only ever part company when Photos is edited elsewhere. A library favourited in
+    /// Photos long before this app existed carries the second and not the first, and drawing
+    /// all of it with an empty heart would be exactly the disagreement this button is meant to
+    /// end.
+    private var isLoved: Bool {
+        if let lovedOverride { return lovedOverride }
+        guard let record else { return false }
+        return record.isLoved || record.isFavoriteInPhotos
+    }
 
     private func toggleControls() {
         showControls.toggle()
@@ -251,11 +280,61 @@ struct PhotoViewerView: View {
         }
     }
 
+    /// The heart writes through to Photos, and says so when it cannot.
+    ///
+    /// The icon and the local rows move first so the gesture feels immediate; the library is
+    /// the slow, fallible part and runs behind them. If it refuses, everything is put back and
+    /// the reason is shown, because a heart that stays filled over a photograph Photos never
+    /// favourited is worse than no heart at all.
     private func toggleLoved() {
         let next = !isLoved
-        app.feedback.setLoved(next, identifier: current)
+        let target = current
+
+        lovedOverride = next
+        setLoved(next, identifier: target)
         Haptics.impact(.light)
         confirm(next ? "Loved" : "Removed")
+
+        Task {
+            guard let failure = await Loved.write(next, identifier: target) else { return }
+            setLoved(!next, identifier: target)
+            // The user may have moved on while the library was thinking. The row above is
+            // theirs wherever they are, but the icon and the message belong to this page.
+            guard target == current else { return }
+            lovedOverride = !next
+            confirm(failure.message)
+        }
+    }
+
+    /// Both local flags at once: the app's own signal, which the ranking learns from, and its
+    /// mirror of `PHAsset.isFavorite`, so the details panel and the Loved filter agree with the
+    /// heart immediately instead of whenever the next indexing pass happens to notice.
+    private func setLoved(_ loved: Bool, identifier: String) {
+        app.feedback.setLoved(loved, identifier: identifier)
+
+        let context = app.container.mainContext
+        guard let record = LibraryQuery.records(for: [identifier], context: context).first else { return }
+        record.isFavoriteInPhotos = loved
+        context.saveIfNeeded()
+    }
+
+    /// Believe the library over the local row when the two disagree.
+    ///
+    /// The row is only as fresh as the last indexing pass, so a photograph favourited in the
+    /// Photos app a minute ago would open here with an empty heart. A tap that has already
+    /// landed on this page outranks this, hence the check on the override — otherwise a
+    /// reconciliation still in flight when the user hearts the picture would undo it.
+    private func reconcileLoved() async {
+        let target = current
+        guard let favorite = await Loved.libraryFavorite(identifier: target),
+              lovedOverride == nil else { return }
+
+        let context = app.container.mainContext
+        guard let record = LibraryQuery.records(for: [target], context: context).first,
+              record.isLoved != favorite || record.isFavoriteInPhotos != favorite else { return }
+        record.isLoved = favorite
+        record.isFavoriteInPhotos = favorite
+        context.saveIfNeeded()
     }
 
     /// Hidden from Memories, not deleted. The photo stays exactly where it is in Photos.
@@ -295,24 +374,31 @@ struct PhotoViewerView: View {
         dayWindow = .dayAcrossYears(month: month, day: day)
     }
 
-    /// Open this exact photograph in Photos, falling back to opening Photos itself.
+    /// Open the Photos app.
     ///
-    /// A `localIdentifier` looks like `UUID/L0/001`; Photos addresses an asset by the UUID
-    /// in front. There is no *documented* URL for this, so it is attempted and checked
-    /// rather than trusted: if the system cannot open it, `photos-redirect://` still gets
-    /// the user to their library instead of the button appearing to do nothing.
+    /// Deliberately not "show this photograph in Photos", and the menu item is worded to match:
+    /// iOS has no public way to hand another app a `PHAsset` and be taken to it. The only
+    /// documented door is `photos-redirect://`, which opens Photos and nothing more; the
+    /// scheme Photos uses internally, `photos-navigation://`, will open a named album and
+    /// takes a `revealassetuuid`, but it is undocumented and has never been shown to land
+    /// reliably on a single asset.
+    ///
+    /// So the reveal is attempted first as a courtesy — a `localIdentifier` is `UUID/L0/001`
+    /// and Photos addresses an asset by the UUID in front — and `photos-redirect://` catches
+    /// it when the system will not take it. Whatever happens, the user ends up in Photos,
+    /// which is exactly and only what the button says it does.
     private func openPhotos() {
         let uuid = current.components(separatedBy: "/").first ?? current
-        let fallback = URL(string: "photos-redirect://")
+        let photos = URL(string: "photos-redirect://")
 
-        guard let direct = URL(string: "photos://asset?id=\(uuid)") else {
-            if let fallback { UIApplication.shared.open(fallback) }
+        guard let reveal = URL(string: "photos-navigation://album?name=recents&revealassetuuid=\(uuid)") else {
+            if let photos { UIApplication.shared.open(photos) }
             return
         }
 
-        UIApplication.shared.open(direct) { opened in
-            guard !opened, let fallback else { return }
-            UIApplication.shared.open(fallback)
+        UIApplication.shared.open(reveal) { opened in
+            guard !opened, let photos else { return }
+            UIApplication.shared.open(photos)
         }
     }
 

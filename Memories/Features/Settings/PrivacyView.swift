@@ -42,7 +42,11 @@ struct PrivacyView: View {
             } header: {
                 Text("Your library")
             } footer: {
-                Text("Memories stores identifiers and computed details, never a second copy of your photos. Hiding a photo from Memories does not delete it, and the app never modifies your library.")
+                // This screen is the app's promise in writing, so it names the one thing that
+                // does get written rather than rounding it down to "nothing". The heart is a
+                // deliberate exception: it is Photos' own favourite flag, and a heart that
+                // disagreed with the one in Photos would be worse than no heart at all.
+                Text("Memories stores identifiers and computed details, never a second copy of your photos. Hiding a photo from Memories does not delete it. The only change Memories makes to your library is the heart: loving a photo here favourites it in Photos, exactly as if you had tapped it there.")
             }
         }
         .navigationTitle("Privacy")

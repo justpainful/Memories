@@ -23,6 +23,7 @@ struct AssetGridView: View {
     @State private var savingFor: String?
     @State private var shareImage: UIImage?
     @State private var selection = PhotoSelection()
+    @State private var loveFailure: String?
 
     var body: some View {
         Group {
@@ -116,6 +117,15 @@ struct AssetGridView: View {
         )) { payload in
             ShareSheet(items: [payload.image])
         }
+        // Rare, and worth interrupting for: the heart has just been put back, so without this
+        // the tile would silently undo what the user asked for.
+        .alert("Couldn't love that photo",
+               isPresented: Binding(get: { loveFailure != nil },
+                                    set: { if !$0 { loveFailure = nil } })) {
+            Button("OK", role: .cancel) { loveFailure = nil }
+        } message: {
+            Text(loveFailure ?? "")
+        }
     }
 
     private func tile(_ record: AssetRecord) -> some View {
@@ -188,9 +198,23 @@ struct AssetGridView: View {
             .frame(width: width, height: width / ratio)
     }
 
+    /// The same heart as the viewer's, and it has to reach the same place.
+    ///
+    /// Loving from the grid used to set the local flag only, so the identical gesture meant two
+    /// different things depending on which screen it was made from — and only one of them
+    /// showed up in Photos.
     private func toggleLoved(_ record: AssetRecord) {
-        app.feedback.setLoved(!record.isLoved, identifier: record.localIdentifier)
+        let loved = !record.isLoved
+        app.feedback.setLoved(loved, identifier: record.localIdentifier)
         Haptics.impact(.light)
+
+        Task {
+            guard let failure = await Loved.write(loved, identifier: record.localIdentifier)
+            else { return }
+            // Put it back rather than leave the grid claiming something the library refused.
+            app.feedback.setLoved(!loved, identifier: record.localIdentifier)
+            loveFailure = failure.message
+        }
     }
 
     /// Hidden from Memories, not deleted. The photo stays exactly where it is in Photos.

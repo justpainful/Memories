@@ -1,4 +1,5 @@
 import Observation
+import SwiftData
 import SwiftUI
 
 /// Multi-select for the grids, the way Photos does it.
@@ -233,11 +234,35 @@ struct SelectionActionBar: View {
         isPreparingShare ? "Preparing photos…" : confirmation
     }
 
+    /// The same heart the viewer draws, so it makes the same promise: this is Photos' own
+    /// favourite flag, not a private one. The whole selection goes to the library in a single
+    /// change request, and if the library refuses it the rows are put back rather than left
+    /// claiming something that never happened.
     private func love() {
         let identifiers = selection.identifiers
-        for identifier in identifiers { app.feedback.setLoved(true, identifier: identifier) }
+        setLoved(true, identifiers: identifiers)
         Haptics.impact(.light)
         finish("Loved \(phrase(identifiers.count))")
+
+        Task {
+            guard let failure = await Loved.write(true, identifiers: identifiers) else { return }
+            setLoved(false, identifiers: identifiers)
+            confirm(failure.message)
+        }
+    }
+
+    /// Both local flags at once, for the same reason the viewer writes both: the ranking
+    /// learns from `isLoved`, and `isFavoriteInPhotos` is what the details panel and the Loved
+    /// filter read, so it cannot be left waiting for the next indexing pass.
+    private func setLoved(_ loved: Bool, identifiers: [String]) {
+        let context = app.container.mainContext
+        for identifier in identifiers {
+            app.feedback.setLoved(loved, identifier: identifier)
+        }
+        for record in LibraryQuery.records(for: identifiers, context: context) {
+            record.isFavoriteInPhotos = loved
+        }
+        context.saveIfNeeded()
     }
 
     /// Hidden from Memories, not deleted. Every photo stays exactly where it is in Photos and
