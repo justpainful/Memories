@@ -10,7 +10,7 @@ struct MemoryDetailView: View {
     @State private var mode: CurationMode = .smart
     @State private var records: [AssetRecord] = []
     @State private var viewerStart: String?
-    @State private var showingSimilar: AssetRecord?
+    @State private var isSaving = false
 
     private let columns = [GridItem(.adaptive(minimum: 108), spacing: 4)]
 
@@ -70,6 +70,7 @@ struct MemoryDetailView: View {
                 Menu {
                     Button("Save to a collection", systemImage: "plus.rectangle.on.folder") {
                         app.feedback.recordSaved(candidate)
+                        isSaving = true
                     }
                     Button("Show me fewer like this", systemImage: "hand.thumbsdown") {
                         app.feedback.recordDismissed(candidate)
@@ -85,6 +86,16 @@ struct MemoryDetailView: View {
         )) { request in
             PhotoViewerView(identifiers: records.map(\.localIdentifier),
                             startAt: request.identifier)
+        }
+        .sheet(isPresented: $isSaving) {
+            // A whole memory is kept as a memory, not exploded into loose files, plus its
+            // frames so the collection can still be browsed as pictures.
+            AddToCollectionSheet(
+                items: [CollectionItem(kind: .memory, reference: candidate.id)]
+                    + records.map { CollectionItem(kind: .asset, reference: $0.localIdentifier) },
+                suggestedCover: candidate.coverIdentifier
+            )
+            .presentationDetents([.medium, .large])
         }
         .task {
             mode = app.settings.smartCuration ? .smart : .pure

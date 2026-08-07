@@ -112,6 +112,9 @@ struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, Space.gutter)
+                // Liquid Glass renders slightly outside the view's own bounds; without room
+                // for it the scroll view clips the top and bottom off every capsule.
+                .padding(.vertical, 8)
             }
         }
         .scrollIndicators(.hidden)
@@ -119,7 +122,16 @@ struct HomeView: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        if app.coordinator.isRunning || !app.coordinator.hasUsableIndex {
+        // Access is checked first. Telling someone their memories are being prepared when the
+        // app cannot see a single photo is the kind of thing that never resolves and never
+        // explains itself.
+        if !app.library.access.canRead {
+            QuietStatusView(
+                title: "Memories can't see your photos",
+                detail: "Photo access is \(app.library.access.title.lowercased()). Grant access in Settings and your memories will start appearing.",
+                symbol: "lock"
+            )
+        } else if app.coordinator.isRunning || !app.coordinator.hasUsableIndex {
             QuietStatusView(
                 title: "Getting your memories ready",
                 detail: "They will appear here as they are found. You can keep using the app while this happens.",

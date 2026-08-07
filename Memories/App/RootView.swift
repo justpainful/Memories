@@ -46,11 +46,28 @@ struct RootView: View {
         }
         .animation(.smooth(duration: 0.35), value: shouldShowOnboarding)
         .preferredColorScheme(app.settings.preferredColorScheme)
-        .task { app.startIndexingIfPossible() }
+        .task {
+            BackgroundWork.register(app: app)
+            // Skipping onboarding means behaving as if it had been completed, and completing
+            // it is what asks for access.
+            if LaunchOptions.skipsOnboarding, app.library.access == .notDetermined {
+                await app.library.requestAccess()
+            }
+            app.startIndexingIfPossible()
+            await MemoryNotifications.reschedule(app: app)
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
+            switch phase {
+            case .active:
                 app.library.refreshAccess()
                 app.startIndexingIfPossible()
+            case .background:
+                // Indexing a large library should not require the user to sit and watch it.
+                BackgroundWork.scheduleAnalysis()
+                BackgroundWork.scheduleRefresh()
+                Task { await MemoryNotifications.reschedule(app: app) }
+            default:
+                break
             }
         }
     }
