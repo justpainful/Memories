@@ -98,12 +98,12 @@ jobs:
           shoot 01-onboarding 6
 
           # Then past it, with time for indexing to have produced something to show.
-          shoot 02-home 55 -hasSeenOnboarding YES -startTab memories
-          shoot 03-timeline 12 -hasSeenOnboarding YES -startTab timeline
-          shoot 04-library 10 -hasSeenOnboarding YES -startTab library
+          shoot 02-home 55 -skipOnboarding -startTab memories
+          shoot 03-timeline 12 -skipOnboarding -startTab timeline
+          shoot 04-library 10 -skipOnboarding -startTab library
 
           xcrun simctl ui "$udid" appearance dark
-          shoot 05-home-dark 14 -hasSeenOnboarding YES -startTab memories
+          shoot 05-home-dark 14 -skipOnboarding -startTab memories
           xcrun simctl ui "$udid" appearance light
 
           ls -la Screenshots
