@@ -38,11 +38,25 @@ enum AppTab: String, Hashable, CaseIterable, Identifiable {
 struct RootView: View {
     @Environment(\.app) private var app
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     @State private var selection: AppTab = LaunchOptions.startTab ?? .memories
     @State private var isExploring = false
     @State private var exploreDestination: TimeWindow?
     @State private var intentMemory: MemoryCandidate?
+
+    /// What the floating bar measured at this launch, on this device, at this text size.
+    @State private var measuredBarHeight: CGFloat = 0
+
+    /// The bar's height plus a breath of air, which is what a scroll view should stop at.
+    ///
+    /// Content that ends exactly at the top edge of a floating control looks like content that
+    /// has been cut off by it. The gap is what says the list finished.
+    private var barInset: CGFloat {
+        measuredBarHeight > 0 ? measuredBarHeight + Space.gutter : 132
+    }
 
     var body: some View {
         Group {
@@ -53,7 +67,8 @@ struct RootView: View {
                 main
             }
         }
-        .animation(.smooth(duration: 0.35), value: shouldShowOnboarding)
+        .animation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35),
+                   value: shouldShowOnboarding)
         .preferredColorScheme(app.settings.preferredColorScheme)
         .sheet(item: $intentMemory) { candidate in
             NavigationStack {
@@ -122,29 +137,46 @@ struct RootView: View {
     }
 
     private var main: some View {
-        ZStack(alignment: .bottom) {
-            TabView(selection: $selection) {
-                surface(.memories) { HomeView() }
-                surface(.timeline) { TimelineView() }
-                surface(.library)  { LibraryView() }
-            }
+        GeometryReader { proxy in
+            ZStack(alignment: .bottom) {
+                TabView(selection: $selection) {
+                    surface(.memories) { HomeView() }
+                    surface(.timeline) { TimelineView() }
+                    surface(.library)  { LibraryView() }
+                }
+                // Every screen inside ends its scroll above the floating bar, using the height
+                // the bar actually came out at rather than a number remembered from one phone.
+                .environment(\.bottomBarInset, barInset)
 
-            // Dim the content while the time panel is open so it reads as the front layer.
-            if isExploring {
-                Color.black.opacity(0.18)
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-                    .onTapGesture { isExploring = false }
-            }
+                // Dim the content while the time panel is open so it reads as the front layer.
+                if isExploring {
+                    // Heavier when the reader has asked for less transparency or more contrast:
+                    // eighteen percent is a hint that the layer underneath has gone quiet, and a
+                    // hint is exactly what those two settings are turned on to stop relying on.
+                    Color.black.opacity(reduceTransparency ? 0.65 : (contrast == .increased ? 0.4 : 0.18))
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                        .onTapGesture { isExploring = false }
+                        // Otherwise the only way out of the panel for a VoiceOver reader is the
+                        // close button, and the dim is an unlabelled slab in the rotor.
+                        .accessibilityLabel("Close Explore Time")
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { isExploring = false }
+                }
 
-            ExploreTimeBar(selection: $selection, isExploring: $isExploring) { window in
-                exploreDestination = window
+                ExploreTimeBar(selection: $selection,
+                               isExploring: $isExploring,
+                               onSelectWindow: { window in exploreDestination = window },
+                               availableHeight: proxy.size.height,
+                               measuredHeight: $measuredBarHeight)
             }
         }
         // The same curve and duration the bar animates itself on. Two layers move on this one
         // value — the panel and the dim behind it — and if they disagree the dim arrives
-        // without its panel.
-        .animation(.smooth(duration: ExploreTimeBar.morphDuration), value: isExploring)
+        // without its panel. That includes agreeing about Reduce Motion.
+        .animation(reduceMotion ? .easeInOut(duration: ExploreTimeBar.morphDuration)
+                                : .smooth(duration: ExploreTimeBar.morphDuration),
+                   value: isExploring)
         .sheet(item: $exploreDestination) { window in
             TimeWindowResultsView(window: window)
         }

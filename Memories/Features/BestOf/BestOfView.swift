@@ -10,6 +10,7 @@ import SwiftUI
 /// ranking is the one the rest of the app already uses; nothing new is computed per scope.
 struct BestOfView: View {
     @Environment(\.app) private var app
+    @Environment(\.bottomBarInset) private var bottomBarInset
 
     @State private var trips: [Trip] = []
     @State private var places: [PlaceScope] = []
@@ -35,65 +36,87 @@ struct BestOfView: View {
                 }
             }
 
+            // The three sections below used to say what they had to say in their *footers*, and
+            // a footer with no rows above it is not a section — it is a grey paragraph floating
+            // under a heading. On a first run, when all three are empty, the screen came out as
+            // one properly drawn list called Time followed by three loose sentences, which
+            // reads as a screen that failed to finish rather than as one with nothing in it
+            // yet. An empty section now carries a real row saying so, so every heading on the
+            // screen is followed by the same kind of thing.
             Section {
-                ForEach(trips) { trip in
-                    NavigationLink {
-                        BestOfResultsScreen(title: trip.title,
-                                            source: .identifiers(trip.assetIdentifiers))
-                    } label: {
-                        ScopeRow(coverIdentifier: trip.coverIdentifier,
-                                 title: trip.title,
-                                 detail: "\(dateRangeText(trip.startDate, trip.endDate)) · \(momentsText(trip.assetIdentifiers.count))")
+                if trips.isEmpty {
+                    EmptyScopeRow(symbol: "airplane", title: "No trips yet", detail: tripsDetail)
+                } else {
+                    ForEach(trips) { trip in
+                        NavigationLink {
+                            BestOfResultsScreen(title: trip.title,
+                                                source: .identifiers(trip.assetIdentifiers))
+                        } label: {
+                            ScopeRow(coverIdentifier: trip.coverIdentifier,
+                                     title: trip.title,
+                                     detail: sideBySide(dateRangeText(trip.startDate, trip.endDate),
+                                                        momentsText(trip.assetIdentifiers.count)))
+                        }
                     }
                 }
             } header: {
                 Text("Trips")
-            } footer: {
-                if trips.isEmpty { Text(tripsFooter) }
             }
 
             Section {
-                ForEach(places) { place in
-                    NavigationLink {
-                        BestOfResultsScreen(title: "Best of \(place.name)",
-                                            source: .identifiers(place.assetIdentifiers))
-                    } label: {
-                        ScopeRow(coverIdentifier: place.coverIdentifier,
-                                 title: place.name,
-                                 detail: momentsText(place.assetIdentifiers.count))
+                if places.isEmpty {
+                    EmptyScopeRow(
+                        symbol: "mappin.and.ellipse",
+                        title: "No places yet",
+                        detail: "Places are named from the coordinates your camera saved. None have been worked out yet."
+                    )
+                } else {
+                    ForEach(places) { place in
+                        NavigationLink {
+                            BestOfResultsScreen(title: "Best of \(place.name)",
+                                                source: .identifiers(place.assetIdentifiers))
+                        } label: {
+                            ScopeRow(coverIdentifier: place.coverIdentifier,
+                                     title: place.name,
+                                     detail: momentsText(place.assetIdentifiers.count))
+                        }
                     }
                 }
             } header: {
                 Text("Places")
-            } footer: {
-                if places.isEmpty {
-                    Text("Places are named from the coordinates your camera saved. None have been worked out yet.")
-                }
             }
 
             Section {
-                ForEach(occasions) { event in
-                    NavigationLink {
-                        BestOfResultsScreen(title: title(for: event),
-                                            source: .identifiers(event.assetIdentifiers))
-                    } label: {
-                        ScopeRow(coverIdentifier: event.coverIdentifier,
-                                 title: title(for: event),
-                                 detail: "\(event.startDate.formatted(date: .abbreviated, time: .omitted)) · \(momentsText(event.assetCount))")
+                if occasions.isEmpty {
+                    EmptyScopeRow(
+                        symbol: "calendar",
+                        title: "No occasions yet",
+                        detail: "Occasions appear once the library has been read through."
+                    )
+                } else {
+                    ForEach(occasions) { event in
+                        NavigationLink {
+                            BestOfResultsScreen(title: title(for: event),
+                                                source: .identifiers(event.assetIdentifiers))
+                        } label: {
+                            ScopeRow(coverIdentifier: event.coverIdentifier,
+                                     title: title(for: event),
+                                     detail: sideBySide(event.startDate.formatted(date: .abbreviated, time: .omitted),
+                                                        momentsText(event.assetCount)))
+                        }
                     }
                 }
             } header: {
                 Text("Occasions")
-            } footer: {
-                if occasions.isEmpty {
-                    Text("Occasions appear once the library has been read through.")
-                }
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Palette.canvas)
-        .contentMargins(.bottom, 132, for: .scrollContent)
+        .contentMargins(.bottom, bottomBarInset, for: .scrollContent)
+        // A list of rows with a thumbnail on one side and a chevron on the other is unreadable
+        // when the two are a foot apart, which is what the full width of an iPad does to it.
+        .readableMeasure()
         .navigationTitle("Best Of")
         .navigationBarTitleDisplayMode(.inline)
         // Finding trips means reading every occasion in the library and its cover frame.
@@ -104,7 +127,7 @@ struct BestOfView: View {
         }
     }
 
-    private var tripsFooter: String {
+    private var tripsDetail: String {
         hasLocatedEvents
             ? "Nothing in your library sits far enough from where you normally photograph to count as a trip."
             : "Trips are worked out from photo locations. None of your photos have a location saved, so there are none to find."
@@ -124,7 +147,17 @@ struct BestOfView: View {
     }
 
     private func momentsText(_ count: Int) -> String {
-        "\(count) \(count == 1 ? "moment" : "moments")"
+        "\(count.formatted(.number)) \(count == 1 ? "moment" : "moments")"
+    }
+
+    /// Two facts on one line, each fenced off from the other.
+    ///
+    /// The middle dot is bidi-neutral: it takes its direction from whatever is around it, so a
+    /// place name in a right-to-left script beside a run of digits can end up on the wrong side
+    /// of its own separator, and the row above it can resolve the other way. The isolates mark
+    /// where each run starts and stops, so neither can drag the other across.
+    private func sideBySide(_ leading: String, _ trailing: String) -> String {
+        "\u{2068}\(leading)\u{2069} · \u{2068}\(trailing)\u{2069}"
     }
 
     private func load() {
@@ -382,33 +415,93 @@ private struct ScopeRow: View {
     let title: String
     var detail: String?
 
+    /// The symbol column and the cover both grow with the type beside them. Frozen, a 16-point
+    /// glyph rendered at an accessibility size hangs out of a 26-point slot on both sides and
+    /// lands on the first word of the title; a 52-point cover next to a 40-point line of text
+    /// stops reading as the thing the row is about.
+    @ScaledMetric(relativeTo: .subheadline) private var iconColumn: CGFloat = 26
+    @ScaledMetric(relativeTo: .subheadline) private var coverSide: CGFloat = 52
+
     var body: some View {
         HStack(spacing: Space.l) {
             if let coverIdentifier {
-                PhotoThumbnail(identifier: coverIdentifier, side: 52, radius: Radius.thumb)
+                PhotoThumbnail(identifier: coverIdentifier, side: coverSide, radius: Radius.thumb)
+                    .accessibilityHidden(true)
             } else if let symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(Typo.scaled(16, .medium))
                     .foregroundStyle(Palette.accent)
-                    .frame(width: 26)
+                    .frame(width: iconColumn)
+                    // Otherwise every row on the screen is read out as its SF Symbol name
+                    // before the words that actually name it: "sun dot max, Today".
+                    .accessibilityHidden(true)
             } else {
                 RoundedRectangle(cornerRadius: Radius.thumb)
                     .fill(Palette.surfaceSunk)
-                    .frame(width: 52, height: 52)
+                    .frame(width: coverSide, height: coverSide)
+                    .accessibilityHidden(true)
             }
 
             VStack(alignment: .leading, spacing: 2) {
+                // Place names, trip names and occasion names are whatever the world and the
+                // user called them, so they are allowed a second line and a little shrinking
+                // before anything is cut off.
                 Text(title)
                     .font(Typo.label)
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
                 if let detail {
                     Text(detail)
                         .font(Typo.meta)
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
                 }
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
+        .frame(minHeight: Hit.min)
+        // One row, one thing said: the name and then what is in it, rather than three separate
+        // elements to swipe through.
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// What a section says when it has nothing in it yet.
+///
+/// Shaped like `ScopeRow` on purpose. The point is not the wording — it is that an empty
+/// section still draws a row, so the heading above it is followed by the same grouped surface
+/// as every other heading on the screen instead of by bare text on the canvas.
+private struct EmptyScopeRow: View {
+    let symbol: String
+    let title: String
+    let detail: String
+
+    @ScaledMetric(relativeTo: .subheadline) private var iconColumn: CGFloat = 26
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Space.l) {
+            Image(systemName: symbol)
+                .font(Typo.scaled(16, .medium))
+                .foregroundStyle(Palette.textTertiary)
+                .frame(width: iconColumn)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Typo.label)
+                    .foregroundStyle(Palette.textSecondary)
+                Text(detail)
+                    .font(Typo.meta)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, Space.xs)
+        .frame(minHeight: Hit.min)
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Print the UDID of the newest available iPhone simulator on the newest iOS runtime.
+"""Print the UDID of the newest available simulator of a given family, on the newest iOS runtime.
 
 Runner images change their device and runtime line-up without warning, so the UI Smoke
 workflow discovers a simulator instead of hard-coding one.
 
     xcrun simctl list devices available --json | python3 Scripts/pick_simulator.py
+    xcrun simctl list devices available --json | python3 Scripts/pick_simulator.py iPad
+
+The family argument exists because the app is no longer iPhone-only. A build that declares
+iPad support and is never once launched on an iPad has not been tested on an iPad; it has been
+assumed to work on one, which is the failure mode this whole lane exists to catch.
 """
 
 from __future__ import annotations
@@ -19,26 +24,27 @@ def runtime_key(identifier: str) -> tuple:
 
 
 def device_key(name: str) -> tuple:
-    """Rank by model number, then prefer Pro Max > Pro > plain, so we get a big screen."""
+    """Rank by model number, then prefer the bigger screen of a generation."""
     numbers = tuple(int(n) for n in re.findall(r"\d+", name)) or (0,)
     rank = 3 if "Pro Max" in name else 2 if "Pro" in name else 1 if "Plus" in name else 0
     return (numbers, rank)
 
 
 def main() -> int:
+    family = sys.argv[1] if len(sys.argv) > 1 else "iPhone"
     devices = json.load(sys.stdin)["devices"]
     for runtime in sorted(devices, key=runtime_key, reverse=True):
         if "iOS" not in runtime:
             continue
-        phones = [d for d in devices[runtime] if d.get("isAvailable") and "iPhone" in d["name"]]
-        if not phones:
+        matches = [d for d in devices[runtime] if d.get("isAvailable") and family in d["name"]]
+        if not matches:
             continue
-        chosen = max(phones, key=lambda d: device_key(d["name"]))
+        chosen = max(matches, key=lambda d: device_key(d["name"]))
         print(chosen["udid"])
         print(f"{chosen['name']} on {runtime}", file=sys.stderr)
         return 0
 
-    print("no available iPhone simulator found", file=sys.stderr)
+    print(f"no available {family} simulator found", file=sys.stderr)
     return 1
 
 

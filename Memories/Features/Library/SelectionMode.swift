@@ -1,6 +1,7 @@
 import Observation
 import SwiftData
 import SwiftUI
+import UIKit
 
 /// Multi-select for the grids, the way Photos does it.
 ///
@@ -41,11 +42,16 @@ final class PhotoSelection {
 
     /// The navigation title while selecting: the instruction until something is picked, then
     /// the count, which is where Photos puts it.
+    ///
+    /// The number goes through `formatted()` rather than straight interpolation. Bare
+    /// interpolation emits ASCII digits with no grouping, so a large library reads "1247"
+    /// beside dates that are being rendered with the reader's own numbering system — the same
+    /// screen mixing two conventions.
     var title: String {
         switch count {
         case 0:  return "Select Items"
         case 1:  return "1 Photo Selected"
-        default: return "\(count) Photos Selected"
+        default: return "\(count.formatted()) Photos Selected"
         }
     }
 
@@ -98,8 +104,15 @@ final class PhotoSelection {
 // MARK: - The mark on a tile
 
 /// The check Photos draws in the corner of a tile.
+///
+/// Two shapes, not two colours: a filled tick for picked and an empty ring for not. That is
+/// deliberate and it is what makes selection survive Differentiate Without Color and a
+/// greyscale rendering — the state is carried by the outline, and the accent is only there
+/// because Photos puts it there.
 struct SelectionCheck: View {
     let isSelected: Bool
+    /// How big the mark is drawn. The caller knows the tile; the mark does not.
+    var side: CGFloat = 21
 
     var body: some View {
         Group {
@@ -112,7 +125,13 @@ struct SelectionCheck: View {
                     .foregroundStyle(Color.white.opacity(0.9))
             }
         }
-        .font(.system(size: 21, weight: .semibold))
+        // `Typo.glyph`, so the mark does not grow with the reader's text size. It sits in the
+        // corner of a photograph that cannot grow with it — at seven across the tile is about
+        // fifty points, and a tick scaled to accessibility sizes would be wider than the
+        // picture it is marking and would hang over its neighbour. What the mark means is
+        // carried by the `.isSelected` trait below, which is where a reader who needs larger
+        // type is actually being served.
+        .font(Typo.glyph(side))
         // What is behind the mark is a photograph of unknown brightness, so it carries its
         // own separation rather than trusting the image to provide any.
         .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
@@ -125,12 +144,21 @@ extension View {
     ///
     /// `cornerRadius` should match the tile's own clip shape so the dimming lands on it
     /// exactly; `AssetGridView` clips its tiles at 6.
+    ///
+    /// `tileSide` is how wide the tile is being drawn right now, and it is optional because a
+    /// caller that has not measured itself is better served by the default mark than by a
+    /// guess. When it is given, the mark is sized from it, so the tick stays a corner badge at
+    /// two photographs across and at seven.
     func selectionOverlay(isSelecting: Bool,
                           isSelected: Bool,
-                          cornerRadius: CGFloat = Radius.thumb) -> some View {
+                          cornerRadius: CGFloat = Radius.thumb,
+                          tileSide: CGFloat = 0) -> some View {
         modifier(SelectionOverlayModifier(isSelecting: isSelecting,
                                           isSelected: isSelected,
-                                          cornerRadius: cornerRadius))
+                                          cornerRadius: cornerRadius,
+                                          markSide: tileSide > 0
+                                              ? min(21, max(13, tileSide * 0.34))
+                                              : 21))
     }
 }
 
@@ -138,6 +166,15 @@ private struct SelectionOverlayModifier: ViewModifier {
     let isSelecting: Bool
     let isSelected: Bool
     let cornerRadius: CGFloat
+    let markSide: CGFloat
+
+    /// The shrink is the one part of this that moves, and it fires once per tap in a mode
+    /// whose whole purpose is tapping many tiles in a row.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The dimming is a fixed wash over photography, which is exactly what both of these
+    /// settings are asking to be told about.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     func body(content: Content) -> some View {
         content
@@ -146,19 +183,40 @@ private struct SelectionOverlayModifier: ViewModifier {
                     // Dimming what was left behind is what makes a half-picked grid legible
                     // at a glance. Without it the user has to hunt for small blue marks.
                     RoundedRectangle(cornerRadius: cornerRadius)
-                        .fill(Palette.photoScrim)
+                        .fill(dimming)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
                 if isSelecting {
-                    SelectionCheck(isSelected: isSelected).padding(5)
+                    SelectionCheck(isSelected: isSelected, side: markSide)
+                        .padding(5)
+                        // Unlabelled it would be read aloud as "checkmark circle fill", and on
+                        // a tile that is a single element it would be the *whole*
+                        // announcement. The `.isSelected` trait below says the same thing in
+                        // the words VoiceOver already uses for it.
+                        .accessibilityHidden(true)
                 }
             }
             // Scaling last so the mark and the dimming travel with the tile instead of
             // hanging off its corner.
-            .scaleEffect(isSelected ? 0.93 : 1)
-            .animation(.smooth(duration: 0.18), value: isSelected)
-            .animation(.smooth(duration: 0.18), value: isSelecting)
+            .scaleEffect(reduceMotion ? 1 : (isSelected ? 0.93 : 1))
+            .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: isSelected)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: isSelecting)
+            // Without this a picked tile and an unpicked one are the same announcement, and a
+            // reader who cannot see the tick has no way to check what a batch is about to be
+            // applied to.
+            .accessibilityAddTraits(isSelecting && isSelected ? [.isSelected] : [])
+    }
+
+    /// A wash over a photograph, at the weight the reader asked for.
+    ///
+    /// The default is tuned to veil the frame without hiding it. Reduce Transparency and
+    /// Increase Contrast are both requests for a firmer separation than that, and the
+    /// separation here is the only thing saying "this one was left behind".
+    private var dimming: Color {
+        reduceTransparency || contrast == .increased
+            ? Color.black.opacity(0.62)
+            : Palette.photoScrim
     }
 }
 
@@ -175,19 +233,40 @@ extension View {
     /// then scrolling to the end of the library to find the buttons. Attached to the scroll view
     /// the same modifier pins the bar to the viewport and insets the content behind it, which is
     /// what it was always meant to do here.
+    ///
+    /// A `ViewModifier` rather than a chain written inline, because it has to read the
+    /// environment — the bar's measured height and Reduce Motion — and a `View` extension has
+    /// no environment of its own to read.
     @MainActor
     func selectionActionBar(_ selection: PhotoSelection) -> some View {
-        self
+        modifier(SelectionActionBarModifier(selection: selection))
+    }
+}
+
+private struct SelectionActionBarModifier: ViewModifier {
+    let selection: PhotoSelection
+
+    /// A bar translating in from off the bottom edge is directional motion, which is the class
+    /// of animation Reduce Motion exists to turn into a cross-dissolve.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// What the floating tab bar actually measured, rather than the 132 this used to write —
+    /// a number taken once, on one phone, at the default text size.
+    @Environment(\.bottomBarInset) private var bottomBarInset
+
+    func body(content: Content) -> some View {
+        content
             .safeAreaInset(edge: .bottom) {
                 if selection.isActive {
                     SelectionActionBar(selection: selection)
                         // Clears the glass tab bar, which is drawn by the app rather than by
                         // the system and so insets nothing on its own.
-                        .padding(.bottom, 132)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding(.bottom, bottomBarInset)
+                        .transition(reduceMotion
+                                    ? .opacity
+                                    : .move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.smooth(duration: 0.3), value: selection.isActive)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: selection.isActive)
     }
 }
 
@@ -201,6 +280,7 @@ struct SelectionActionBar: View {
     let selection: PhotoSelection
 
     @Environment(\.app) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isSaving = false
     @State private var shareBatch: ShareBatch?
     @State private var isPreparingShare = false
@@ -216,10 +296,19 @@ struct SelectionActionBar: View {
                 Text(caption)
                     .font(Typo.control)
                     .foregroundStyle(Palette.textPrimary)
+                    .multilineTextAlignment(.center)
+                    // The caption carries a library's refusal as well as a confirmation, and
+                    // those sentences are long. Two lines that shrink a little is a caption;
+                    // one line that clips is a bug report.
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
                     .padding(.horizontal, Space.l)
                     .padding(.vertical, Space.s)
+                    .frame(maxWidth: 420)
                     .glassPanel(cornerRadius: 18)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .transition(reduceMotion
+                                ? .opacity
+                                : .opacity.combined(with: .scale(scale: 0.95)))
             }
 
             GlassEffectContainer(spacing: 18) {
@@ -239,8 +328,8 @@ struct SelectionActionBar: View {
             .disabled(selection.isEmpty || isPreparingShare)
             .opacity(selection.isEmpty ? 0.55 : 1)
         }
-        .animation(.smooth(duration: 0.25), value: caption)
-        .animation(.smooth(duration: 0.2), value: selection.isEmpty)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: caption)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: selection.isEmpty)
         .sheet(isPresented: $isSaving) {
             AddToCollectionSheet(
                 items: selection.identifiers.map { CollectionItem(kind: .asset, reference: $0) },
@@ -325,7 +414,7 @@ struct SelectionActionBar: View {
             return
         }
         if selection.count > Self.shareLimit {
-            confirm("Sharing the first \(Self.shareLimit)")
+            confirm("Sharing the first \(Self.shareLimit.formatted())")
         }
         shareBatch = ShareBatch(images: images)
     }
@@ -333,21 +422,40 @@ struct SelectionActionBar: View {
     /// A finished batch empties the selection but stays in selection mode, so the user can see
     /// what happened and carry on picking. Sharing is left alone: the set is still wanted once
     /// the share sheet closes.
+    ///
+    /// The selection is emptied *before* the confirmation goes out, so the one announcement
+    /// carries both halves of what just happened: what was done, and that the grid is no
+    /// longer holding anything. Two separate announcements would not — posting a second one
+    /// immediately after the first replaces it.
     private func finish(_ text: String) {
-        confirm(text)
         selection.clear()
+        confirm(text, alsoSaying: "Nothing selected")
     }
 
-    private func confirm(_ text: String) {
+    /// The transient caption, and the only evidence a batch ever ran.
+    ///
+    /// It is drawn for a second and a half and then it is gone, which is fine for a reader who
+    /// was looking at it. For one who was not, it never existed: `finish` empties the selection
+    /// at the same moment, so a forty-photo hide would otherwise be silence followed by an
+    /// empty grid. So the text is posted as an announcement as well as drawn, and when VoiceOver
+    /// is speaking it the caption waits long enough to still be on screen when the sentence ends.
+    private func confirm(_ text: String, alsoSaying extra: String? = nil) {
         confirmation = text
+
+        let spoken = extra.map { "\(text). \($0)" } ?? text
+        AccessibilityNotification.Announcement(spoken).post()
+
+        let linger: Duration = UIAccessibility.isVoiceOverRunning
+            ? .seconds(5.0)
+            : .seconds(1.6)
         Task {
-            try? await Task.sleep(for: .seconds(1.6))
+            try? await Task.sleep(for: linger)
             if confirmation == text { confirmation = nil }
         }
     }
 
     private func phrase(_ count: Int) -> String {
-        count == 1 ? "1 photo" : "\(count) photos"
+        count == 1 ? "1 photo" : "\(count.formatted()) photos"
     }
 }
 

@@ -26,11 +26,25 @@ final class GridPrefetcher {
     private var warmedSize: CGSize = .zero
     private var work: Task<Void, Never>?
 
+    /// What the last window was warmed *for*, as opposed to where it was centred.
+    ///
+    /// The step guard below asks only whether the scroll has moved far enough, which is the
+    /// right question while a grid holds still and the wrong one the moment it does not. Pinch
+    /// the density one rung, turn the phone, or change the filter under a stationary finger,
+    /// and the tiles are a different size or a different set while the centre has not moved at
+    /// all — so the prefetcher went on warming the previous size for the previous list, and
+    /// every bitmap it produced was one nothing would ever ask for.
+    private var lastSide: CGFloat = 0
+    private var lastCount: Int = 0
+
     /// Called as each tile comes into view. Cheap on all but every sixth call.
     func tileAppeared(at index: Int, identifiers: [String], side: CGFloat) {
         guard !identifiers.isEmpty else { return }
-        if let centre, abs(index - centre) < Self.step { return }
+        let isSameGrid = side == lastSide && identifiers.count == lastCount
+        if let centre, isSameGrid, abs(index - centre) < Self.step { return }
         centre = index
+        lastSide = side
+        lastCount = identifiers.count
 
         let lower = max(0, index - Self.behind)
         let upper = min(identifiers.count, index + Self.ahead)
@@ -40,7 +54,12 @@ final class GridPrefetcher {
         // `UITraitCollection.current` rather than `UIScreen.main`: this is not a view and has
         // no environment to read, and `UIScreen.main` names one screen in a world where an app
         // can be on several, which is why Apple deprecated it.
-        let requested = side * UITraitCollection.current.displayScale
+        //
+        // The size goes through the loader's own ladder rather than being multiplied out here,
+        // because warming at a size no tile will ever request is the same as not warming at
+        // all: Photos matches a cached frame by its numbers, and nothing else.
+        let requested = PhotoImageLoader.requestSide(forSide: side,
+                                                     scale: UITraitCollection.current.displayScale)
         let size = CGSize(width: requested, height: requested)
 
         // Only the newest window matters; a request from two screens ago is wasted decoding.
@@ -60,7 +79,10 @@ final class GridPrefetcher {
         guard !warmed.isEmpty else { return }
         PhotoImageLoader.shared.stopCaching(warmed, targetSize: warmedSize)
         warmed = []
+        warmedSize = .zero
         centre = nil
+        lastSide = 0
+        lastCount = 0
     }
 
     private func warm(_ assets: [PHAsset], size: CGSize) {

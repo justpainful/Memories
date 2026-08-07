@@ -31,10 +31,19 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Memories reads your library on this iPhone to find and organize your memories. Photos are analyzed on device and are never uploaded.</string>
 
-	<!-- Local-only background indexing. No push, no remote notifications, no APNs. -->
+	<!--
+	  Local-only background indexing. No push, no remote notifications, no APNs.
+
+	  `fetch` is here because `BGAppRefreshTaskRequest` requires it: without it every
+	  `submit` of the refresh task fails, silently, and the scheduled Lock Screen memories stop
+	  being kept in step with the library. It buys no network capability — there is no network
+	  code in this app — only the right to be woken briefly to recompute what tomorrow's memory
+	  would be.
+	-->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>
+		<string>fetch</string>
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
@@ -42,10 +51,16 @@
 		<string>com.justpainful.Memories.refresh</string>
 	</array>
 
+	<!--
+	  More than one window of this app at a time, which is what an iPad user expects of anything
+	  they browse in: a year open beside a place, a memory open beside the library it came from.
+	  Everything shared lives on `MemoriesApp`, which is one instance however many windows there
+	  are, so the second window reads the same store as the first rather than starting its own.
+	-->
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
+		<true/>
 	</dict>
 
 	<!--
@@ -67,9 +82,29 @@
 	<array>
 		<string>arm64</string>
 	</array>
+	<!--
+	  Orientation. The app used to declare portrait and nothing else, on iPhone only, which
+	  made every landscape layout in the code unreachable and every iPad a scaled-up phone.
+
+	  Landscape is not a nicety here. The one thing this app is for is looking at photographs
+	  and watching clips, and a landscape photograph turned sideways in a portrait window is
+	  shown at a third of the size the screen could give it. Upside-down is left out on iPhone
+	  for the reason Apple leaves it out: the receiver is at the bottom.
+
+	  iPad gets all four, because there is no top on an iPad.
+	-->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>

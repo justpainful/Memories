@@ -129,9 +129,49 @@ final class PhotoLibraryService {
         if access.canRead { startObserving() }
     }
 
+    /// True when widening the selection is something the system can do from inside the app.
+    ///
+    /// Only Limited Access has an in-app answer. Denied and Restricted are decisions made
+    /// outside the app and can only be undone outside it, which is what keeps the Settings
+    /// route in the app at all — as the second-best answer, for the cases where it is the only
+    /// one, rather than as the answer to everything.
+    var canWidenSelection: Bool { access == .limited }
+
     /// Present the system sheet that lets the user add more photos to a Limited selection.
     func presentLimitedLibraryPicker(from controller: UIViewController) {
         PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: controller)
+    }
+
+    /// The same sheet, without the caller having to find a view controller.
+    ///
+    /// The picker was written and then never reached: nothing in the app called it, and both
+    /// places that should have — the feed's Limited Access notice and the Settings row — sent
+    /// the user out to iOS Settings instead, which is the long way round to a sheet Apple hands
+    /// us in-app. The reason it stayed unreachable is the signature: SwiftUI has no view
+    /// controller to pass, so every call site would have had to invent a representable to find
+    /// one. It is one lookup, and it belongs here once rather than at each surface.
+    ///
+    /// Returns false when there is no window to present from — during a scene transition, or in
+    /// a preview — so a caller can fall back to Settings rather than appear to do nothing.
+    @discardableResult
+    func presentLimitedLibraryPicker() -> Bool {
+        guard access == .limited, let controller = Self.topmostViewController() else { return false }
+        PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: controller)
+        return true
+    }
+
+    /// The view controller a system sheet should be presented from.
+    ///
+    /// Walks to the front of the presentation stack rather than stopping at the root: UIKit
+    /// refuses to present from a controller that is already presenting something, and in this
+    /// app the Limited Access notice can itself be inside a sheet.
+    private static func topmostViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let window = scene?.windows.first(where: { $0.isKeyWindow }) ?? scene?.windows.first,
+              var controller = window.rootViewController else { return nil }
+        while let presented = controller.presentedViewController { controller = presented }
+        return controller
     }
 
     private static func map(_ status: PHAuthorizationStatus) -> PhotoAccess {

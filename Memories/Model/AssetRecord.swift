@@ -93,6 +93,19 @@ final class AssetRecord {
     /// "Hide from Memories". Explicitly not a delete: the asset stays untouched in Photos and
     /// can be restored from the Hidden Memories screen.
     var excludedFromMemories: Bool = false
+
+    /// Set because somebody in this photograph has been hidden, not because the photograph has.
+    ///
+    /// Kept apart from `excludedFromMemories` on purpose. They mean different things and they
+    /// are undone by different actions: bringing a person back must not un-hide a photograph
+    /// the user hid by hand, and un-hiding that photograph must not bring the person back. One
+    /// flag would have to guess which of the two the user meant.
+    ///
+    /// It is stored rather than worked out at read time because the curator asks this question
+    /// of tens of thousands of rows on every pass, and answering it live would mean loading
+    /// every hidden person's asset list into every one of those passes.
+    var hiddenByPerson: Bool = false
+
     var isLoved: Bool = false
     var shownCount: Int = 0
     var lastShownAt: Date?
@@ -133,7 +146,7 @@ extension AssetRecord {
 
     /// Everything the curator is allowed to consider for an emotional memory.
     var isMemoryEligible: Bool {
-        !excludedFromMemories && isLocallyAvailable && isBestInSimilarityCluster
+        !excludedFromMemories && !hiddenByPerson && isLocallyAvailable && isBestInSimilarityCluster
     }
 
     var source: SourcePlatform? { sourceRaw.flatMap(SourcePlatform.init(rawValue:)) }

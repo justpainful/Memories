@@ -61,9 +61,27 @@ enum AmbientColor {
 /// The faint colour bleed behind the top of the feed. Sits under content, never over it.
 struct AmbientWash: View {
     let identifier: String?
-    var height: CGFloat = 340
+
+    /// The height of the container the wash bleeds down, not the height of the wash itself.
+    ///
+    /// The band used to be a flat 340 points, which is roughly a third of a portrait phone and
+    /// was therefore right on exactly one shape of screen. Turned sideways it covered almost the
+    /// whole of a 393-point-tall window, so the gradient's `Palette.canvas` end never arrived and
+    /// the entire feed sat on a tinted field instead of on paper; on a 1366-point iPad it stopped
+    /// a quarter of the way down, just under the date headline, as a visible horizontal seam. A
+    /// fraction of the container is the same picture at every size.
+    ///
+    /// Zero means the caller has not measured yet — true for one frame and in previews — and
+    /// falls back to the number the band has always been.
+    var containerHeight: CGFloat = 0
 
     @Environment(\.colorScheme) private var scheme
+    /// Increase Contrast exists to take decorative tints out from behind text, and this tint is
+    /// drawn directly behind the feed's headline. Reduce Transparency asks for the same thing in
+    /// different words.
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var packed: Int?
 
     var body: some View {
@@ -72,17 +90,33 @@ struct AmbientWash: View {
             startPoint: .top,
             endPoint: .bottom
         )
-        .frame(height: height)
+        .frame(height: bandHeight)
         .frame(maxWidth: .infinity, alignment: .top)
         .ignoresSafeArea(edges: .top)
         .allowsHitTesting(false)
-        .animation(.easeInOut(duration: 0.5), value: packed)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: packed)
         .task(id: identifier) { await resolve() }
     }
 
+    /// A third of the window, held between the two sizes at which the effect still reads as a
+    /// bleed: below about 240 points it is a stripe, above about 460 it is a background.
+    private var bandHeight: CGFloat {
+        guard containerHeight > 0 else { return 340 }
+        return min(max(containerHeight * 0.32, 240), 460)
+    }
+
     private var washColor: Color {
-        guard let packed else { return Palette.canvas }
+        // The colour is sampled from whatever photograph happens to be the hero, at up to 42%
+        // saturation, so the contrast ratio behind the date headline and the indexing line
+        // changes with the reader's own library and can never be measured here. When either
+        // setting is on, the wash is not drawn more faintly — it is not drawn. A weaker tint of
+        // an unknown hue is still an unknown hue.
+        guard !isMuted, let packed else { return Palette.canvas }
         return AmbientColor.wash(from: packed, in: scheme)
+    }
+
+    private var isMuted: Bool {
+        contrast == .increased || reduceTransparency
     }
 
     private func resolve() async {

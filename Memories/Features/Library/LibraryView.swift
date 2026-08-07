@@ -5,6 +5,8 @@ import SwiftUI
 /// Direct access by kind, plus the surfaces that do not deserve a tab of their own.
 struct LibraryView: View {
     @Environment(\.app) private var app
+    /// What the floating tab bar actually measured, rather than the 132 this used to write.
+    @Environment(\.bottomBarInset) private var bottomBarInset
     @State private var counts: [MediaFilter: Int] = [:]
     @State private var hiddenCount = 0
 
@@ -58,8 +60,13 @@ struct LibraryView: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
+            .contentMargins(.bottom, bottomBarInset, for: .scrollContent)
+            // This is a source list — nine short labels with a number at the end of each. Left
+            // to fill an iPad it becomes a row whose label and count are a hand's width apart,
+            // which is a table, not a list. The canvas is applied outside the cap so the page
+            // is still the page; only the rows stop.
+            .readableMeasure()
             .background(Palette.canvas)
-            .contentMargins(.bottom, 132, for: .scrollContent)
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.large)
             .toolbar(.hidden, for: .tabBar)   // the app draws its own; see RootView.surface
@@ -140,21 +147,75 @@ private struct LibraryRow: View {
     let title: String
     let count: Int?
 
+    /// The symbol column grows with the label beside it. Frozen at twenty-six points it would
+    /// be a glyph spilling over its own gutter and into the title as soon as the reader asked
+    /// for larger text.
+    @ScaledMetric(relativeTo: .callout) private var symbolColumn: CGFloat = 26
+    /// Label and value on one line stop fitting long before the largest sizes, and this row has
+    /// both plus a disclosure chevron the system draws.
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
-        HStack(spacing: Space.l) {
-            Image(systemName: symbol)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Palette.accent)
-                .frame(width: 26)
-            Text(title).font(Typo.label).foregroundStyle(Palette.textPrimary)
-            Spacer()
-            if let count {
-                Text("\(count)")
-                    .font(Typo.meta)
-                    .foregroundStyle(Palette.textTertiary)
-                    .monospacedDigit()
+        row
+            // Nine rows, each of them a symbol the reader does not need named and a bare
+            // integer that could be anything. Combined into one element it reads "Live Photos,
+            // 412 items" rather than "livephoto, Live Photos, 412".
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityText)
+    }
+
+    @ViewBuilder
+    private var row: some View {
+        if typeSize.isAccessibilitySize {
+            // At accessibility sizes the count goes under the title instead of fighting it for
+            // the same line — the same thing Settings does with its own value rows.
+            HStack(alignment: .firstTextBaseline, spacing: Space.l) {
+                icon
+                VStack(alignment: .leading, spacing: 2) {
+                    label
+                    if count != nil { value }
+                }
+            }
+        } else {
+            HStack(spacing: Space.l) {
+                icon
+                label
+                Spacer(minLength: Space.s)
+                if count != nil { value }
             }
         }
+    }
+
+    private var icon: some View {
+        Image(systemName: symbol)
+            .font(Typo.scaled(16, .medium))
+            .foregroundStyle(Palette.accent)
+            .frame(width: symbolColumn)
+    }
+
+    private var label: some View {
+        Text(title)
+            .font(Typo.label)
+            .foregroundStyle(Palette.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var value: some View {
+        if let count {
+            // `Text(_:format:)` rather than interpolation: a bare `"\(count)"` is ASCII digits
+            // with no grouping, so a library of fifteen thousand reads "15234" beside dates
+            // that are being formatted properly two rows away.
+            Text(count, format: .number)
+                .font(Typo.meta)
+                .foregroundStyle(Palette.textTertiary)
+                .monospacedDigit()
+        }
+    }
+
+    private var accessibilityText: String {
+        guard let count else { return title }
+        return "\(title), \(count.formatted()) items"
     }
 }
 
@@ -170,7 +231,7 @@ struct MediaKindScreen: View {
         AssetCollectionScreen(
             title: filter.title,
             records: records,
-            emptyTitle: "No \(filter.title.lowercased()) yet",
+            emptyTitle: emptyTitle,
             isLoading: isLoading
         )
         // Reading the whole library is the better part of a second at this size, and the
@@ -179,6 +240,24 @@ struct MediaKindScreen: View {
         .task {
             await Task.yield()
             load()
+        }
+    }
+
+    /// The empty state, written out per kind rather than assembled.
+    ///
+    /// It used to be `"No \(filter.title.lowercased()) yet"`, which had three faults at once.
+    /// `lowercased()` takes no locale, so it applies invariant casing rules — meaningless in a
+    /// script without case and actively wrong in Turkish. It destroys Apple's own product
+    /// capitalization: "Live Photos" is a name, and "No live photos yet" is wrong in English
+    /// before it is wrong anywhere else. And a sentence glued together from a fragment and a
+    /// noun can never be reordered by anyone translating it.
+    private var emptyTitle: String {
+        switch filter {
+        case .all:         return "No photos yet"
+        case .photos:      return "No photos yet"
+        case .videos:      return "No videos yet"
+        case .livePhotos:  return "No Live Photos yet"
+        case .screenshots: return "No screenshots yet"
         }
     }
 
@@ -194,6 +273,7 @@ struct MediaKindScreen: View {
 /// Hidden from Memories — with the point of the screen right on each tile: Restore.
 struct HiddenMemoriesView: View {
     @Environment(\.app) private var app
+    @Environment(\.bottomBarInset) private var bottomBarInset
     @State private var records: [AssetRecord] = []
     @State private var isLoading = true
     @State private var selection = PhotoSelection()
@@ -204,6 +284,10 @@ struct HiddenMemoriesView: View {
                 Text("Hidden photos stay in your library. They are only kept out of Memories, and you can restore any of them here.")
                     .font(Typo.meta)
                     .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    // Prose, so it stops at a measure. The grid below it does not — pictures
+                    // are looked at, and there is no such thing as too many of them across.
+                    .readableMeasure()
                     .padding(.horizontal, Space.gutter)
                     .padding(.top, Space.s)
 
@@ -221,11 +305,18 @@ struct HiddenMemoriesView: View {
                                 load()
                             } label: {
                                 Image(systemName: "arrow.uturn.backward.circle.fill")
-                                    .font(.system(size: 19))
+                                    // `Typo.glyph`, which does not scale. This is drawn in the
+                                    // corner of a thumbnail that cannot grow with it — at the
+                                    // densest rung the tile is about fifty points across, and a
+                                    // symbol at accessibility sizes would be wider than the
+                                    // photograph and wider than its own touch area, so the
+                                    // visible button would stop matching the region that
+                                    // answers a finger. The word is on the label below.
+                                    .font(Typo.glyph(19, .regular))
                                     .foregroundStyle(.white, Palette.accent)
                                     // The glyph is 19 points across. The touch has to be 44,
                                     // whatever is drawn inside it.
-                                    .frame(width: 44, height: 44)
+                                    .frame(width: Hit.min, height: Hit.min)
                                     .contentShape(.circle)
                             }
                             .buttonStyle(.plain)
@@ -235,7 +326,7 @@ struct HiddenMemoriesView: View {
                     selection: selection
                 )
             }
-            .padding(.bottom, 132)
+            .padding(.bottom, bottomBarInset)
         }
         .scrollIndicators(.hidden)
         .selectionActionBar(selection)

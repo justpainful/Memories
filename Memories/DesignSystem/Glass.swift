@@ -33,6 +33,34 @@ enum GlassTone {
     case regular
     case clear
 
+    /// What this tone draws as when the reader has asked iOS to stop making things
+    /// see-through.
+    ///
+    /// Reduce Transparency is not a request for a weaker blur — it is a request for a *surface*,
+    /// because a control you can see the wallpaper through is a control some people cannot find
+    /// the edges of. So the fallback is opaque, and it is opaque with a system colour rather
+    /// than with a material, which would be the same failure by another name.
+    ///
+    /// The two tones fall back differently because they sit over different things. `regular`
+    /// lives over the app's own canvas, so it becomes the canvas. `clear` lives over a
+    /// photograph in a black full-screen viewer whose glyphs are all white, so it becomes
+    /// black; handing it `systemBackground` would put a white slab over the picture in light
+    /// mode and white glyphs on it.
+    var opaqueFallback: Color {
+        switch self {
+        case .regular: return Palette.canvas
+        case .clear:   return .black
+        }
+    }
+
+    /// The edge that fallback needs to be a shape rather than a smear.
+    var opaqueEdge: Color {
+        switch self {
+        case .regular: return Palette.hairline
+        case .clear:   return .white.opacity(0.28)
+        }
+    }
+
     /// The material this tone actually draws with.
     ///
     /// Clear is handed a low black tint rather than used bare. Clear makes no promise about
@@ -61,7 +89,8 @@ extension View {
     /// A transient surface that holds controls — the Explore Time panel, an action cluster.
     /// Not interactive itself; the things inside it are.
     func glassPanel(cornerRadius: CGFloat = Radius.hero, tone: GlassTone = .regular) -> some View {
-        self.glassEffect(tone.material, in: .rect(cornerRadius: cornerRadius))
+        modifier(GlassControlModifier(shape: .rounded(cornerRadius), tone: tone,
+                                      tinted: false, interactive: false))
     }
 }
 
@@ -69,24 +98,45 @@ private struct GlassControlModifier: ViewModifier {
     let shape: GlassShape
     let tone: GlassTone
     let tinted: Bool
+    var interactive: Bool = true
+
+    /// The one setting glass has to answer. Everything else about the material adapts on its
+    /// own; this is the reader saying they do not want the material at all.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
-        switch shape {
-        case .capsule:
-            content.glassEffect(glass, in: .capsule)
-        case .rounded(let radius):
-            content.glassEffect(glass, in: .rect(cornerRadius: radius))
-        case .circle:
-            content.glassEffect(glass, in: .circle)
+        if reduceTransparency {
+            switch shape {
+            case .capsule:            opaque(content, in: .capsule)
+            case .rounded(let radius): opaque(content, in: .rect(cornerRadius: radius))
+            case .circle:             opaque(content, in: .circle)
+            }
+        } else {
+            switch shape {
+            case .capsule:            content.glassEffect(glass, in: .capsule)
+            case .rounded(let radius): content.glassEffect(glass, in: .rect(cornerRadius: radius))
+            case .circle:             content.glassEffect(glass, in: .circle)
+            }
         }
+    }
+
+    /// A solid control, shaped exactly like the glass one it stands in for.
+    ///
+    /// The stroke matters as much as the fill: without an edge, an opaque capsule the colour of
+    /// the background it sits on is invisible, which is the opposite of what the setting asked
+    /// for.
+    private func opaque<S: InsettableShape>(_ content: Content, in shape: S) -> some View {
+        content
+            .background(tinted ? Palette.accent : tone.opaqueFallback, in: shape)
+            .overlay(shape.strokeBorder(tone.opaqueEdge, lineWidth: 1))
     }
 
     /// A tinted control names its own colour, so it replaces the tone's tint rather than
     /// adding to it: a selected chip should read as the system accent, not as the accent seen
     /// through a dark pane.
     private var glass: Glass {
-        let base = tone.material
-        return tinted ? base.tint(Palette.accent).interactive() : base.interactive()
+        let base = tinted ? tone.material.tint(Palette.accent) : tone.material
+        return interactive ? base.interactive() : base
     }
 }
 
@@ -100,13 +150,23 @@ struct GlassChip: View {
     var isSelected: Bool = false
     let action: () -> Void
 
+    /// Selection is drawn in colour, and colour is the one channel some readers do not have.
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: Space.s) {
                 if let systemImage {
-                    Image(systemName: systemImage).font(.system(size: 13, weight: .semibold))
+                    Image(systemName: systemImage).font(Typo.glyph(13))
                 }
+                // A selected chip is a filled accent capsule and an unselected one is clear
+                // glass, which is the whole of the difference — so with Differentiate Without
+                // Color on, the selected one also carries a tick. It goes after the label
+                // rather than before it, where it reads as a state rather than as an icon.
                 Text(title).font(Typo.control)
+                if isSelected && differentiateWithoutColor {
+                    Image(systemName: "checkmark").font(Typo.glyph(12, .bold))
+                }
             }
             .foregroundStyle(isSelected ? Color.white : Palette.textPrimary)
             .padding(.horizontal, Space.l)
@@ -114,14 +174,18 @@ struct GlassChip: View {
             // short of the smallest target Apple will vouch for — and these are among the most
             // tapped controls in the app. The floor is stated rather than padded up to, so it
             // still holds if the label ever grows.
-            .frame(minHeight: 44)
+            .frame(minHeight: Hit.min)
             // Without this only the text and the glyph answer a finger. The padding around
             // them is most of the capsule, and it was dead.
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
         .glassControl(.capsule, tinted: isSelected)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        // The symbol beside the label is decoration; without this VoiceOver reads its SF
+        // Symbol name — "line 3 horizontal decrease circle" — before the word the chip is for.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 
@@ -136,7 +200,7 @@ struct GlassIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 17, weight: .semibold))
+                .font(Typo.glyph(17))
                 // Over a photograph the glass is clear, so the symbol carries its own
                 // contrast rather than relying on the material to provide it. The shadow is
                 // tight and dark rather than wide and faint: it has to draw an edge around a
@@ -152,7 +216,11 @@ struct GlassIconButton: View {
         }
         .buttonStyle(.plain)
         .glassControl(.circle, tone: tone, tinted: prominent)
+        // The glyph is the whole of the label, so it is replaced rather than described: without
+        // `.ignore`, VoiceOver reads the SF Symbol's name after the label it was given.
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
+        .accessibilityAddTraits(.isButton)
     }
 }
 

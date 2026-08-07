@@ -53,6 +53,9 @@ struct PhotoGrid<Content: View>: View {
     /// what lets one long pinch travel several rungs instead of stalling at the first.
     @State private var pinchAnchor: CGFloat = 1
 
+    /// The width this grid was actually given, which is not the width of the device.
+    @State private var width: CGFloat = Adaptive.referenceWidth
+
     init(@ViewBuilder content: @escaping () -> Content) {
         self.content = content
     }
@@ -62,15 +65,27 @@ struct PhotoGrid<Content: View>: View {
             content()
         }
         .padding(spacing)
+        .measuringWidth($width)
         .gesture(pinch)
+        .accessibilityAction(named: "Show larger photos") { step(to: -1) }
+        .accessibilityAction(named: "Show smaller photos") { step(to: 1) }
     }
 
-    private var columns: Int { PhotoGridDensity.rung(nearest: storedColumns) }
+    /// What the pinch selected — a photograph size, not a column count.
+    private var density: Int { PhotoGridDensity.rung(nearest: storedColumns) }
 
-    private var spacing: CGFloat { PhotoGridDensity.spacing(for: columns) }
+    /// How many of those fit across the width this grid was handed.
+    ///
+    /// On a portrait phone this is the density itself, which is what the gesture has always
+    /// meant. Turned sideways, or on an iPad, or in a Split View third of one, it is more
+    /// columns of the *same size* rather than three photographs blown up to a third of a metre
+    /// each. The pinch still chooses; it just no longer assumes the screen.
+    private var columns: Int { Adaptive.gridColumns(density: density, width: width) }
 
-    /// Fixed columns rather than `.adaptive`: the pinch is choosing the count outright, and an
-    /// adaptive grid would keep re-deriving one of its own from the available width.
+    private var spacing: CGFloat { PhotoGridDensity.spacing(for: density) }
+
+    /// Fixed columns rather than `.adaptive`: the pinch is choosing the size outright, and an
+    /// adaptive grid would keep re-deriving one of its own and fight the gesture.
     private var items: [GridItem] {
         Array(repeating: GridItem(.flexible(minimum: 1), spacing: spacing), count: columns)
     }
@@ -85,12 +100,23 @@ struct PhotoGrid<Content: View>: View {
     /// fingers travels further than closing them, so the outward gesture needs more room
     /// before it counts as a deliberate step.
     private func step(at magnification: CGFloat) {
-        let index = PhotoGridDensity.index(nearest: storedColumns)
         let scale = magnification / pinchAnchor
-        let target = scale > 1.4 ? index - 1 : (scale < 0.72 ? index + 1 : index)
-        guard target != index, PhotoGridDensity.ladder.indices.contains(target) else { return }
-
+        let direction = scale > 1.4 ? -1 : (scale < 0.72 ? 1 : 0)
+        guard direction != 0 else { return }
         pinchAnchor = magnification
+        step(to: direction)
+    }
+
+    /// One rung of the ladder, in whichever direction.
+    ///
+    /// Split out from the pinch so VoiceOver has something to call. A two-finger magnification
+    /// is not a gesture VoiceOver passes through, so without a named action the density of every
+    /// grid in the app would be frozen at whatever it was for anyone using the screen reader.
+    private func step(to direction: Int) {
+        let index = PhotoGridDensity.index(nearest: storedColumns)
+        let target = index + direction
+        guard PhotoGridDensity.ladder.indices.contains(target) else { return }
+
         withAnimation(.smooth(duration: 0.3)) {
             storedColumns = PhotoGridDensity.ladder[target]
         }

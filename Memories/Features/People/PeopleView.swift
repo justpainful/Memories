@@ -8,6 +8,7 @@ import UIKit
 /// the app has nowhere to look a name up from and never guesses at one.
 struct PeopleView: View {
     @Environment(\.app) private var app
+    @Environment(\.bottomBarInset) private var bottomBarInset
     @Query(sort: \PersonRecord.faceCount, order: .reverse) private var people: [PersonRecord]
 
     @State private var showsHidden = false
@@ -16,7 +17,17 @@ struct PeopleView: View {
     @State private var faceCount = 0
     @State private var isStillLooking = true
 
-    private let columns = [GridItem(.adaptive(minimum: 104), spacing: Space.l)]
+    /// The cell grows with the reader's type instead of the grid packing more of them in.
+    ///
+    /// A hundred and four points is the width of a face plus the name under it at the default
+    /// size. When the name triples and the cell does not, the grid stops being a wall of people
+    /// and becomes a wall of "Ale…", "Chr…", "Gra…" — which is the one thing this screen exists
+    /// to prevent. Tying the minimum to the name's own text style keeps the two in step.
+    @ScaledMetric(relativeTo: .subheadline) private var tileSide: CGFloat = 104
+
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: tileSide), spacing: Space.l)]
+    }
 
     var body: some View {
         Group {
@@ -29,15 +40,24 @@ struct PeopleView: View {
                             NavigationLink {
                                 PersonScreen(person: person)
                             } label: {
-                                PersonTile(person: person)
+                                PersonTile(person: person, side: tileSide)
                             }
                             .buttonStyle(.plain)
                             .contextMenu { menu(for: person) }
+                            // The context menu is the only route to renaming and hiding, and a
+                            // long press is not a route VoiceOver has. These put the same two
+                            // things in the actions rotor, where they are reachable.
+                            .accessibilityAction(named: person.isNamed ? "Rename" : "Add Name") {
+                                beginRename(person)
+                            }
+                            .accessibilityAction(named: person.isHidden ? "Show" : "Hide") {
+                                setHidden(!person.isHidden, for: person)
+                            }
                         }
                     }
                     .padding(.horizontal, Space.gutter)
                     .padding(.top, Space.m)
-                    .padding(.bottom, 132)
+                    .padding(.bottom, bottomBarInset)
                 }
                 .scrollIndicators(.hidden)
             }
@@ -51,6 +71,12 @@ struct PeopleView: View {
                     Button {
                         showsHidden.toggle()
                         Haptics.selection()
+                        // The grid silently gains or loses people. Sighted users see that
+                        // happen; without this nobody else is told it did.
+                        AccessibilityNotification
+                            .Announcement(showsHidden ? "Showing hidden people"
+                                                      : "Hidden people hidden")
+                            .post()
                     } label: {
                         Image(systemName: showsHidden ? "eye.slash" : "eye")
                     }
@@ -139,20 +165,40 @@ struct PeopleView: View {
     @ViewBuilder
     private func menu(for person: PersonRecord) -> some View {
         Button {
-            draftName = person.name ?? ""
-            renaming = person
+            beginRename(person)
         } label: {
             Label(person.isNamed ? "Rename" : "Add Name", systemImage: "pencil")
         }
 
         Button {
-            person.isHidden.toggle()
-            app.container.mainContext.saveIfNeeded()
-            Haptics.impact(.light)
+            setHidden(!person.isHidden, for: person)
         } label: {
             Label(person.isHidden ? "Show" : "Hide",
                   systemImage: person.isHidden ? "eye" : "eye.slash")
         }
+    }
+
+    private func beginRename(_ person: PersonRecord) {
+        draftName = person.name ?? ""
+        renaming = person
+    }
+
+    /// Hiding somebody has to reach the photographs, not just the tile.
+    ///
+    /// This used to write `person.isHidden` and save, and nothing anywhere read the flag back —
+    /// so the one thing the control promises, that the person stops turning up in memories,
+    /// was the one thing it did not do. `PersonVisibility` owns the whole story: it sets the
+    /// flag and then brings every asset's `hiddenByPerson` back in line with who is hidden now,
+    /// which is what curation actually filters on. A full reconcile rather than a diff, because
+    /// a photograph can hold two people and hiding one of them must not take the other's
+    /// photographs with it.
+    private func setHidden(_ hidden: Bool, for person: PersonRecord) {
+        PersonVisibility.setHidden(hidden, person: person, context: app.container.mainContext)
+        Haptics.impact(.light)
+        AccessibilityNotification
+            .Announcement(hidden ? "\(person.displayName) hidden from memories"
+                                 : "\(person.displayName) shown in memories")
+            .post()
     }
 
     private var isRenaming: Binding<Bool> {
@@ -166,6 +212,11 @@ struct PeopleView: View {
         person.name = name.isEmpty ? nil : name
         app.container.mainContext.saveIfNeeded()
         Haptics.impact(.light)
+        // The alert closes and one caption in a grid of faces changes. That is invisible to a
+        // reader who is not looking at that one tile.
+        AccessibilityNotification
+            .Announcement(name.isEmpty ? "Name removed" : "Named \(name)")
+            .post()
         cancelRename()
     }
 
@@ -179,36 +230,64 @@ struct PeopleView: View {
 
 private struct PersonTile: View {
     let person: PersonRecord
+    var side: CGFloat = 104
 
     var body: some View {
         VStack(spacing: Space.s) {
-            FaceThumbnail(person: person)
+            FaceThumbnail(person: person, side: side)
+                // Dimming is the colour half of "hidden" and the badge is the shape half, so
+                // the state survives greyscale, a colour vision deficiency and Differentiate
+                // Without Color without needing to read either of them.
                 .opacity(person.isHidden ? 0.45 : 1)
                 .overlay(alignment: .bottomTrailing) {
                     if person.isHidden {
                         Image(systemName: "eye.slash.circle.fill")
-                            .font(.system(size: 20))
+                            // Sized by the face it is pinned to the corner of, not by the
+                            // reader's type: a badge that grows past its thumbnail lands on
+                            // the neighbouring one.
+                            .font(Typo.glyph(20, .regular))
                             .foregroundStyle(Palette.canvas, Palette.textSecondary)
                     }
                 }
 
+            // Two lines and a floor on the scale, because these are names people chose and
+            // "Grandma Josephine" truncated to "Gra…" beside three other "Gra…"s is a grid of
+            // faces with the one thing that tells them apart taken off it. The row simply
+            // grows — a lazy grid has no reason not to let it.
             Text(person.displayName)
                 .font(Typo.label)
                 .foregroundStyle(person.isNamed ? Palette.textPrimary : Palette.textSecondary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+                .multilineTextAlignment(.center)
 
             Text(count)
                 .font(Typo.meta)
                 .foregroundStyle(Palette.textTertiary)
                 .monospacedDigit()
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(person.displayName), \(count)")
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenLabel)
+    }
+
+    /// Everything the tile says visually, in one line.
+    ///
+    /// The badge and the dimming were the only signals that somebody is hidden, and an explicit
+    /// label overrides whatever `children: .combine` would have picked up from them — so with
+    /// "Show hidden people" on, a VoiceOver user could not tell which people were hidden, and
+    /// therefore could not tell what the Show/Hide action was about to do. "Unnamed" is spelled
+    /// out for the same reason: on screen it is a grey caption rather than a name, and read
+    /// aloud on its own it sounds like one.
+    private var spokenLabel: String {
+        var parts = [person.isNamed ? person.displayName : "Unnamed person", count]
+        if person.isHidden { parts.append("hidden from memories") }
+        return parts.joined(separator: ", ")
     }
 
     private var count: String {
         let total = person.assetIdentifiers.count
-        return "\(total) \(total == 1 ? "photo" : "photos")"
+        return "\(total.formatted()) \(total == 1 ? "photo" : "photos")"
     }
 }
 
@@ -254,6 +333,7 @@ struct FaceThumbnail: View {
     /// one particular screen. A face is a fraction of its frame, so getting this wrong is the
     /// difference between a crisp crop and a soft one.
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var image: UIImage?
 
@@ -267,15 +347,21 @@ struct FaceThumbnail: View {
                     .scaledToFill()
                     .transition(.opacity)
             } else {
+                // The placeholder is a fraction of the circle it is centred in, so it is sized
+                // by geometry rather than by the reader's type — at accessibility sizes a
+                // scaling glyph would simply be larger than the face it stands in for.
                 Image(systemName: "person.fill")
-                    .font(.system(size: side * 0.34, weight: .light))
+                    .font(Typo.glyph(side * 0.34, .light))
                     .foregroundStyle(Palette.textTertiary)
             }
         }
         .frame(width: side, height: side)
         .clipShape(.circle)
         .overlay { Circle().strokeBorder(Palette.hairline, lineWidth: 0.5) }
-        .animation(.easeOut(duration: 0.22), value: image != nil)
+        // A cross-fade is the mildest thing on this screen, but a grid of faces fades in a
+        // couple of dozen of them at once as it scrolls, and that is the case the setting is
+        // about. Nil here means the image simply appears.
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: image != nil)
         .task(id: person.coverAssetIdentifier) { await load() }
     }
 

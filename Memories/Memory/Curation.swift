@@ -88,6 +88,11 @@ enum LibraryQuery {
 
     static func passes(_ record: AssetRecord, options: CurationOptions) -> Bool {
         if !options.includeHiddenFromMemories && record.excludedFromMemories { return false }
+        // Hiding somebody is a memories decision, not a library one: their photographs stay in
+        // the Library, in the Timeline and in Search — they simply stop being proposed as
+        // something to remember. So this is checked against the same switch as a hidden
+        // photograph, and browsing, which sets that switch, still shows them.
+        if !options.includeHiddenFromMemories && record.hiddenByPerson { return false }
         if !options.includeCloudOnly && !record.isLocallyAvailable { return false }
 
         switch options.media {

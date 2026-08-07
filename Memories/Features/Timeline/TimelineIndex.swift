@@ -10,13 +10,24 @@ struct MonthBucket: Sendable, Identifiable, Hashable {
 
     var id: Int { year * 100 + month }
 
-    var title: String {
-        let symbols = Calendar.current.monthSymbols
-        return symbols.indices.contains(month - 1) ? symbols[month - 1] : "Month"
-    }
-
+    /// The first instant of the month, and the only thing a view should draw a month from.
+    ///
+    /// Everything a screen wants to say about a month — "August", "August 2019", the order the
+    /// two go in, the digits the year is written with — is a formatting question with a
+    /// different answer in every language, and a date is the only input that lets the system
+    /// answer it. Pasting a month name and a rendered integer together, which is what this
+    /// screen used to do, fixes an English word order into the layout.
     var startDate: Date {
         Calendar.current.date(from: DateComponents(year: year, month: month, day: 1)) ?? .distantPast
+    }
+
+    /// The month's name on its own, for a row that already sits under its year.
+    ///
+    /// Derived from the date rather than indexed out of `monthSymbols`, so it cannot fall
+    /// through to a placeholder, and so it follows the reader's calendar rather than assuming
+    /// twelve Gregorian months.
+    var title: String {
+        startDate.formatted(.dateTime.month(.wide))
     }
 }
 
@@ -29,6 +40,17 @@ struct DayBucket: Sendable, Identifiable, Hashable {
     var coverIdentifier: String?
 
     var id: Int { year * 10_000 + month * 100 + day }
+
+    /// The day itself, so a screen can name it — "Friday 12 August" — instead of announcing a
+    /// bare number in a grid whose columns a screen reader cannot see.
+    ///
+    /// Built through `Calendar.interval(year:month:day:)` rather than `date(from:)` because that
+    /// helper already refuses a day the calendar does not have: `date(from:)` rolls 29 February
+    /// in a common year forward to 1 March and hands it back without a word, which would label
+    /// a cell with the wrong day rather than with none.
+    var date: Date? {
+        Calendar.current.interval(year: year, month: month, day: day)?.start
+    }
 }
 
 extension LibraryIndexer {

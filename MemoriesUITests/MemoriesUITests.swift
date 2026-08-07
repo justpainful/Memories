@@ -17,6 +17,12 @@ import XCTest
 /// are collected and reported together at the end. The previous arrangement — never fail on a
 /// missed tap — meant a run where the tour got stuck in the photo viewer and photographed it
 /// eight times still reported success, which is the one outcome worse than a red build.
+///
+/// There are three tours rather than one, and the two new ones are the point of this file now.
+/// The app used to declare itself portrait-only on iPhone, and every font in it was a fixed
+/// number of points — so a single portrait tour at the default text size photographed the only
+/// configuration the app had ever been built for. The configurations that were never looked at
+/// are exactly the ones that were broken: the largest accessibility text size, and landscape.
 final class MemoriesUITests: XCTestCase {
 
     private var app: XCUIApplication!
@@ -30,58 +36,61 @@ final class MemoriesUITests: XCTestCase {
         app.launchArguments = ["-skipOnboarding"]
     }
 
-    // MARK: The tour
+    override func tearDown() {
+        // A rotation outlives the test that made it, and the next tour would then photograph a
+        // sideways app while claiming to be portrait.
+        XCUIDevice.shared.orientation = .portrait
+        super.tearDown()
+    }
+
+    // MARK: The tours
 
     func testCaptureEverySurface() throws {
+        launchAndSettle()
+        tour(prefix: "")
+        finish()
+    }
+
+    /// The same app at the largest text size iOS offers.
+    ///
+    /// This is where a fixed-height row clips its own label, a two-column layout collides with
+    /// itself, and a button gets pushed off the bottom of a screen that cannot scroll. None of
+    /// it is visible at the default size, which is why none of it was found.
+    func testLargestTextSize() throws {
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+        ]
+        launchAndSettle()
+        tour(prefix: "ax-")
+        finish()
+    }
+
+    /// The same app lying on its side.
+    ///
+    /// Unreachable until the app declared landscape at all. Everything measured against the
+    /// height of a portrait phone — a hero card, a scrubber column, a panel with a fixed
+    /// maximum height — fails here first.
+    func testLandscape() throws {
+        launchAndSettle()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        settle()
+        tour(prefix: "landscape-")
+        finish()
+    }
+
+    // MARK: One tour
+
+    private func launchAndSettle() {
         app.launch()
         allowPhotoAccess()
 
         // Metadata indexing is quick; the Vision passes are not. Wait for the feed to have
         // something rather than racing it.
         waitForFeed()
-        capture("01-home", expecting: "Memories")
+    }
 
-        safeTap(app.buttons["Explore time"])
-        capture("02-explore-time")
-        if !safeTap(app.buttons["Close"]) { app.tap() }
-        settle()
-
-        returnToRoot()
-        safeTap(app.buttons["memory.card"].firstMatch)
-        capture("03-memory")
-
-        safeTap(app.scrollViews.buttons.element(boundBy: 2))
-        capture("04-viewer")
-
-        returnToRoot()
-        safeTap(app.buttons["Timeline"].firstMatch)
-        capture("05-timeline", expecting: "Timeline")
-
-        returnToRoot()
-        safeTap(app.buttons["Library"].firstMatch)
-        capture("06-library", expecting: "Library")
-
-        // Places is in this list because the fixture goes to the trouble of writing three
-        // separate GPS clusters into the seed photos, and until now nothing ever photographed
-        // the screen that reads them.
-        for (row, name) in [("People", "07-people"), ("Best Of", "08-best-of"),
-                            ("Calendar", "09-calendar"), ("Places", "10-places"),
-                            ("Search", "11-search"), ("Collections", "12-collections")] {
-            openRow(row)
-            capture(name, expecting: row)
-            returnToRoot()
-            safeTap(app.buttons["Library"].firstMatch)
-        }
-
-        openRow("Settings")
-        capture("13-settings", expecting: "Settings")
-        openRow("Local Processing")
-        capture("14-privacy", expecting: "Privacy")
-
-        returnToRoot()
-        safeTap(app.buttons["Memories"].firstMatch)
-        capture("15-home-again", expecting: "Memories")
-
+    private func finish() {
         XCTAssertTrue(app.state == .runningForeground, "The app did not survive the tour")
         if !missteps.isEmpty {
             XCTFail("""
@@ -90,6 +99,51 @@ final class MemoriesUITests: XCTestCase {
                 \(missteps.joined(separator: "\n"))
                 """)
         }
+    }
+
+    private func tour(prefix: String) {
+        capture("\(prefix)01-home", expecting: "Memories")
+
+        safeTap(app.buttons["Explore time"])
+        capture("\(prefix)02-explore-time")
+        if !safeTap(app.buttons["Close"]) { app.tap() }
+        settle()
+
+        returnToRoot()
+        safeTap(app.buttons["memory.card"].firstMatch)
+        capture("\(prefix)03-memory")
+
+        safeTap(app.scrollViews.buttons.element(boundBy: 2))
+        capture("\(prefix)04-viewer")
+
+        returnToRoot()
+        safeTap(app.buttons["Timeline"].firstMatch)
+        capture("\(prefix)05-timeline", expecting: "Timeline")
+
+        returnToRoot()
+        safeTap(app.buttons["Library"].firstMatch)
+        capture("\(prefix)06-library", expecting: "Library")
+
+        // Places is in this list because the fixture goes to the trouble of writing three
+        // separate GPS clusters into the seed photos, and until now nothing ever photographed
+        // the screen that reads them.
+        for (row, name) in [("People", "07-people"), ("Best Of", "08-best-of"),
+                            ("Calendar", "09-calendar"), ("Places", "10-places"),
+                            ("Search", "11-search"), ("Collections", "12-collections")] {
+            openRow(row)
+            capture("\(prefix)\(name)", expecting: row)
+            returnToRoot()
+            safeTap(app.buttons["Library"].firstMatch)
+        }
+
+        openRow("Settings")
+        capture("\(prefix)13-settings", expecting: "Settings")
+        openRow("Local Processing")
+        capture("\(prefix)14-privacy", expecting: "Privacy")
+
+        returnToRoot()
+        safeTap(app.buttons["Memories"].firstMatch)
+        capture("\(prefix)15-home-again", expecting: "Memories")
     }
 
     // MARK: Steps

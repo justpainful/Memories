@@ -10,8 +10,19 @@ enum BackgroundWork {
     static let analysisIdentifier = "com.justpainful.Memories.analysis"
     static let refreshIdentifier = "com.justpainful.Memories.refresh"
 
+    /// Registration happens once per process, never once per window.
+    ///
+    /// `BGTaskScheduler.register` raises if the same identifier is registered twice, and the
+    /// call site is a `.task` on the root view — which runs once per scene. On iPhone there is
+    /// only ever one scene so this never came up; now that the app can have two windows open
+    /// on an iPad, the second one would abort the app on arrival.
+    @MainActor private static var isRegistered = false
+
     @MainActor
     static func register(app: AppEnvironment) {
+        guard !isRegistered else { return }
+        isRegistered = true
+
         BGTaskScheduler.shared.register(forTaskWithIdentifier: analysisIdentifier, using: nil) { task in
             guard let task = task as? BGProcessingTask else { return }
             Task { @MainActor in handleAnalysis(task, app: app) }

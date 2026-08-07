@@ -21,7 +21,36 @@ struct ExploreTimeBar: View {
     /// for the morph to finish waits for this rather than guessing at a number.
     static let morphDuration = 0.42
 
+    /// The height of the window this bar is floating at the bottom of. The panel is sized
+    /// against it rather than against a number, because a fixed 380-point list is taller than
+    /// the whole screen of an iPhone lying on its side.
+    var availableHeight: CGFloat = 800
+
+    /// Written back with what this bar actually came out at, so every scrolling screen in the
+    /// app can end above it instead of above a number someone measured once.
+    @Binding var measuredHeight: CGFloat
+
     @Namespace private var glass
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The morph, or a cross-dissolve where the reader has asked for less movement.
+    ///
+    /// This is the app's signature transition, and it is the first thing to go: the bar does not
+    /// merely fade into the panel, it grows out of it across most of the screen. Reduce Motion
+    /// exists for exactly that. The two states still swap, and they still swap on the same
+    /// timing so nothing else in the shell arrives out of step — they just stop travelling.
+    private var morph: Animation? {
+        reduceMotion ? .easeInOut(duration: Self.morphDuration) : .smooth(duration: Self.morphDuration)
+    }
+
+    /// The widest this bar is allowed to get.
+    ///
+    /// Three tabs and a button stretched across a landscape iPad is not a tab bar, it is a
+    /// horizon with four things on it. Apple's own floating bars stay compact and centred in a
+    /// wide window, and so does this one — the number is the point at which the tabs stop
+    /// getting further apart and start staying put.
+    private static let widthCap: CGFloat = 520
 
     var body: some View {
         // The container's spacing is the distance at which two pieces of glass start reaching
@@ -34,9 +63,13 @@ struct ExploreTimeBar: View {
             if isExploring {
                 // The panel sits over dimmed content and holds a list, so it keeps the
                 // regular material: clear glass here would make its rows hard to read.
-                panel
-                    .glassEffect(.regular, in: .rect(cornerRadius: Radius.hero))
-                    .glassEffectID("bar", in: glass)
+                surface(panel, shape: .rounded(Radius.hero), interactive: false)
+                    // Under Reduce Motion the two states stop being one travelling piece of
+                    // glass and become two that cross-fade, which is what dropping the shared
+                    // identity does. Keeping the identity and merely slowing the curve would
+                    // still send the bar sliding up the screen.
+                    .glassEffectID(reduceMotion ? "panel" : "bar", in: glass)
+                    .transition(.opacity)
             } else {
                 HStack(spacing: Space.l) {
                     // Regular, not clear. Clear glass was tried here and the screenshots
@@ -46,23 +79,65 @@ struct ExploreTimeBar: View {
                     // whole reason it exists. Clear belongs where the content is a photograph
                     // the user is deliberately looking at — the viewer — and the controls
                     // should get out of its way.
-                    tabs
-                        .glassEffect(.regular.interactive(), in: .capsule)
+                    surface(tabs, shape: .capsule)
                         .glassEffectID("bar", in: glass)
 
-                    exploreButton
-                        .glassEffect(.regular.interactive(), in: .circle)
+                    surface(exploreButton, shape: .circle)
                         .glassEffectID("explore", in: glass)
                 }
+                .transition(.opacity)
             }
         }
+        // Centred and capped rather than stretched. `frame(maxWidth:)` on its own would also
+        // stop the bar shrinking on a narrow window, so the cap and the centring are two frames.
+        .frame(maxWidth: Self.widthCap)
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, Space.gutter)
         .padding(.bottom, Space.s)
+        // What every scrolling screen in the app ends above. Measured rather than assumed: the
+        // bar grows with the reader's text size and with the home indicator, and a screen that
+        // insets by a remembered number puts its last row underneath it.
+        //
+        // Only measured while collapsed. Expanded it is the Explore Time panel, which is most
+        // of the screen tall, and inseting every feed by that would leave a hole at the bottom
+        // of the app for as long as the panel is open.
+        .measuringBarHeight(isExploring ? .constant(0) : $measuredHeight)
         // `RootView` animates the same value on the layer above, for the dim behind this bar.
         // The innermost one wins inside its own subtree, so the two are not competing — but
         // they do have to stay the same curve and the same duration, or the panel and the dim
         // it sits on will arrive at different moments.
-        .animation(.smooth(duration: Self.morphDuration), value: isExploring)
+        .animation(morph, value: isExploring)
+    }
+
+    /// The bar's glass, or the solid control it becomes when the reader has turned transparency
+    /// off.
+    ///
+    /// Written out here rather than routed through `glassControl` because these three surfaces
+    /// carry a `glassEffectID`, and that identifier has to land on the same view the material
+    /// does for the morph between the bar and the panel to happen at all.
+    @ViewBuilder
+    private func surface<V: View>(_ content: V, shape: GlassShape, interactive: Bool = true) -> some View {
+        if reduceTransparency {
+            switch shape {
+            case .capsule:             solid(content, in: Capsule())
+            case .circle:              solid(content, in: Circle())
+            case .rounded(let radius): solid(content, in: RoundedRectangle(cornerRadius: radius,
+                                                                          style: .continuous))
+            }
+        } else {
+            let material: Glass = interactive ? .regular.interactive() : .regular
+            switch shape {
+            case .capsule:             content.glassEffect(material, in: .capsule)
+            case .circle:              content.glassEffect(material, in: .circle)
+            case .rounded(let radius): content.glassEffect(material, in: .rect(cornerRadius: radius))
+            }
+        }
+    }
+
+    private func solid<V: View, S: InsettableShape>(_ content: V, in shape: S) -> some View {
+        content
+            .background(Palette.canvas, in: shape)
+            .overlay(shape.strokeBorder(Palette.hairline, lineWidth: 1))
     }
 
     // MARK: Collapsed
@@ -77,20 +152,32 @@ struct ExploreTimeBar: View {
                 } label: {
                     VStack(spacing: 3) {
                         Image(systemName: tab.symbol)
-                            .font(.system(size: 17, weight: .medium))
+                            .font(Typo.glyph(17, .medium))
                             .symbolVariant(selection == tab ? .fill : .none)
-                        Text(tab.title).font(Typo.tabLabel)
+                        Text(tab.title)
+                            .font(Typo.tabLabel)
+                            // A tab title is a single word in a bar that cannot get taller
+                            // without eating the screen, so it is allowed to grow and then
+                            // hold. It never truncates: a shrunk-to-fit label still reads,
+                            // a clipped one does not.
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(selection == tab ? Palette.accent : Palette.textSecondary)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, minHeight: Hit.min)
                     .padding(.vertical, 10)
                     // Matches the selection pill the system bar draws, so replacing it
                     // does not read as a downgrade.
                     .background {
                         if selection == tab {
+                            // The pill slides from the old tab to the new one, which is the
+                            // system bar's own behaviour — except under Reduce Motion, where
+                            // dropping the shared geometry makes it appear where it belongs
+                            // instead of travelling there.
                             Capsule()
                                 .fill(Palette.accent.opacity(0.14))
-                                .matchedGeometryEffect(id: "tabPill", in: glass)
+                                .matchedGeometryEffect(id: reduceMotion ? "tabPill\(tab.rawValue)" : "tabPill",
+                                                       in: glass)
                         }
                     }
                     // Each tab claims a third of the bar, but only the glyph and its label
@@ -105,7 +192,12 @@ struct ExploreTimeBar: View {
             }
         }
         .padding(.horizontal, Space.s)
-        .animation(.smooth(duration: 0.28), value: selection)
+        // The one place in the app that caps text growth, and it is capped rather than
+        // uncapped because this bar is pinned to the bottom of the screen: it cannot get
+        // taller without taking the screen with it. It still answers the setting up to the
+        // first accessibility size, and every label in it is also read aloud.
+        .chromeTypeSize()
+        .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: selection)
     }
 
     private var exploreButton: some View {
@@ -114,7 +206,7 @@ struct ExploreTimeBar: View {
             Haptics.impact()
         } label: {
             Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                .font(.system(size: 18, weight: .medium))
+                .font(Typo.glyph(18, .medium))
                 .foregroundStyle(Palette.accent)
                 .frame(width: 56, height: 56)
                 // Fifty-six points of glass around an eighteen-point glyph, and only the glyph
@@ -138,9 +230,9 @@ struct ExploreTimeBar: View {
                     isExploring = false
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(Typo.glyph(13, .bold))
                         .foregroundStyle(Palette.textSecondary)
-                        .frame(width: 44, height: 44)
+                        .frame(width: Hit.min, height: Hit.min)
                         .contentShape(.circle)
                 }
                 .buttonStyle(.plain)
@@ -167,26 +259,35 @@ struct ExploreTimeBar: View {
                                     Text(window.title)
                                         .font(Typo.control)
                                         .foregroundStyle(Palette.textPrimary)
-                                    Spacer()
+                                    Spacer(minLength: Space.m)
                                     Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
+                                        .font(Typo.glyph(12, .semibold))
                                         .foregroundStyle(Palette.textTertiary)
+                                        // The one arrow in this panel that means "forwards",
+                                        // which is leftwards in a right-to-left layout.
+                                        .flipsForRightToLeftLayoutDirection(true)
                                 }
                                 .padding(.horizontal, Space.l)
                                 // Eleven points above and below a sixteen-point line is a
                                 // forty-two point row, and every row in this panel is a
                                 // destination. Two short is still short.
-                                .frame(minHeight: 44)
+                                .frame(minHeight: Hit.min)
                                 .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(window.title)
+                            .accessibilityAddTraits(.isButton)
                         }
                     }
                 }
                 .padding(.bottom, Space.l)
             }
             .scrollIndicators(.hidden)
-            .frame(maxHeight: 380)
+            // Against the window rather than against a number. Three hundred and eighty points
+            // is more than the whole height of an iPhone lying on its side, so the panel used to
+            // open taller than the screen it was opening on and its own close button went with
+            // it. Two thirds of what there is, and never more than the list needs.
+            .frame(maxHeight: max(200, min(380, availableHeight * 0.62)))
         }
     }
 }

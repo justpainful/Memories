@@ -19,12 +19,15 @@ enum Loved {
         case notEditable
         case refused
 
+        /// Typographic apostrophes rather than ASCII ticks. These four sentences are the only
+        /// thing the user is ever shown when the heart fails, and a vertical `'` is the single
+        /// most reliable tell that a screen was not written by Apple.
         var message: String {
             switch self {
-            case .noAccess:    return "Memories can't change your library"
+            case .noAccess:    return "Memories can’t change your library"
             case .gone:        return "No longer in your library"
-            case .notEditable: return "Photos won't allow this change"
-            case .refused:     return "Photos didn't save that"
+            case .notEditable: return "Photos won’t allow this change"
+            case .refused:     return "Photos didn’t save that"
             }
         }
     }

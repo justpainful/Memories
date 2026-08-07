@@ -8,6 +8,7 @@ import SwiftUI
 /// problem, and pretending to do it now would mean sending photos somewhere.
 struct SearchView: View {
     @Environment(\.app) private var app
+    @Environment(\.bottomBarInset) private var bottomBarInset
 
     @State private var query = ""
     @State private var results: [AssetRecord] = []
@@ -31,26 +32,15 @@ struct SearchView: View {
 
                     if !matchedCollections.isEmpty {
                         VStack(alignment: .leading, spacing: Space.s) {
-                            Text("Collections").overlineStyle().padding(.horizontal, Space.gutter)
+                            Text("Collections")
+                                .overlineStyle()
+                                .padding(.horizontal, Space.gutter)
+                                .accessibilityAddTraits(.isHeader)
                             ForEach(matchedCollections) { collection in
                                 NavigationLink {
                                     CollectionDetailView(collection: collection)
                                 } label: {
-                                    HStack {
-                                        Text(collection.name)
-                                            .font(Typo.label)
-                                            .foregroundStyle(Palette.textPrimary)
-                                        Spacer()
-                                        Text("\(collection.itemCount)")
-                                            .font(Typo.meta)
-                                            .foregroundStyle(Palette.textTertiary)
-                                    }
-                                    .padding(.horizontal, Space.gutter)
-                                    // A row of type is fifteen points tall and the gap between
-                                    // its two ends is not part of it at all: without these the
-                                    // only place the row could be hit was the letters.
-                                    .padding(.vertical, Space.m)
-                                    .contentShape(.rect)
+                                    CollectionMatchRow(collection: collection)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -60,7 +50,11 @@ struct SearchView: View {
                     AssetGridView(
                         records: results,
                         emptyTitle: "Nothing matched",
-                        emptyDetail: "Try a date, a year, a place, or a kind like “videos”.",
+                        // Named rather than hinted at. Search here reads metadata and nothing
+                        // else — it has never looked inside a photograph — so a query it did
+                        // not understand is the ordinary case, and the useful answer is what it
+                        // does understand rather than "try again".
+                        emptyDetail: "This searches dates, months, years, places and kinds — try a month, a year, “videos”, “screenshots”, “favourites”, or the name of a place.",
                         emptySymbol: "magnifyingglass",
                         isLoading: isSearching,
                         selection: selection
@@ -68,7 +62,7 @@ struct SearchView: View {
                 }
             }
             .padding(.top, Space.s)
-            .padding(.bottom, 132)
+            .padding(.bottom, bottomBarInset)
         }
         .scrollIndicators(.hidden)
         .selectionActionBar(selection)
@@ -76,6 +70,10 @@ struct SearchView: View {
         .navigationTitle("Search")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Date, month, year, place, or kind")
+        // Searching by place can only match occasions that have been given a name, and until
+        // that work moves into the indexing pass this is one of the few screens in a position
+        // to make sure it is running. It costs nothing if it already is.
+        .task { PlaceNaming.shared.start(in: app) }
         // Every keystroke used to read the whole library on the main thread and sort it. At
         // fifteen thousand rows that is the keyboard locking up between letters, and typing
         // "August" paid for it six times. Waiting for a pause in the typing — and cancelling
@@ -95,20 +93,43 @@ struct SearchView: View {
 
     /// Today's date leads, because a day typed without a year searches every year — one tap is
     /// the shortest route to this date through the whole library.
+    ///
+    /// The month and the year are worked out rather than typed. A literal "August" is a token
+    /// the month parser only recognises while the phone is in English — it matches against
+    /// `Calendar.monthSymbols` — so the app's own suggestion was one of the few queries
+    /// guaranteed to return nothing in any other language. A literal "2024" had the separate
+    /// problem of going stale on a fixed date.
     private var hints: [String] {
-        [Date.now.formatted(.dateTime.month(.wide).day()),
-         "2024", "August", "Videos", "Live Photos", "Screenshots", "Favourites"]
+        let calendar = Calendar.current
+        var terms = [Date.now.formatted(.dateTime.month(.wide).day())]
+
+        let monthIndex = calendar.component(.month, from: .now) - 1
+        if calendar.monthSymbols.indices.contains(monthIndex) {
+            terms.append(calendar.monthSymbols[monthIndex])
+        }
+        // Last year rather than this one: a year that has finished has photographs all through
+        // it, which is what makes it a useful thing to tap.
+        terms.append((calendar.component(.year, from: .now) - 1)
+            .formatted(.number.grouping(.never)))
+
+        return terms + ["Videos", "Live Photos", "Screenshots", "Favourites"]
     }
 
     private var suggestions: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Try").overlineStyle().padding(.bottom, Space.s)
+            Text("Try")
+                .overlineStyle()
+                .padding(.bottom, Space.s)
+                .accessibilityAddTraits(.isHeader)
             ForEach(hints, id: \.self) { hint in
                 Button { query = hint } label: {
                     HStack(spacing: Space.m) {
+                        // Decoration. Left to itself VoiceOver reads the symbol's own name
+                        // before every suggestion — "magnifyingglass, August".
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 13))
+                            .font(Typo.scaled(13))
                             .foregroundStyle(Palette.textTertiary)
+                            .accessibilityHidden(true)
                         Text(hint).font(Typo.label).foregroundStyle(Palette.textPrimary)
                         Spacer()
                     }
@@ -116,7 +137,7 @@ struct SearchView: View {
                     // drawn, and a button is hit where it is drawn — so everything to the
                     // right of the word was dead. A single line of type is not 44 points
                     // tall either, which is the other half of why these were hard to press.
-                    .frame(minHeight: 44)
+                    .frame(minHeight: Hit.min)
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
@@ -196,13 +217,43 @@ struct SearchView: View {
             described.append("that place")
         }
 
+        // Nothing in the query was recognised as a date, a kind, a favourite or a place.
+        //
+        // This used to hand back `pool` — the whole library, unfiltered — under the line
+        // "Showing everything that matched", which is not true of a query that matched nothing.
+        // It is the state a query in any language the keyword table does not cover lands in, and
+        // fifteen thousand photographs presented as the answer to a word the app did not
+        // understand is worse than an empty result, because it looks like a working search.
+        // Saying so, and saying what search does read, is the honest version.
+        guard !described.isEmpty else {
+            results = []
+            interpretation = nil
+            selection.clear()
+            matchedCollections = collections(matching: lowered, context: context)
+            return
+        }
+
         results = pool.sorted { $0.momentDate > $1.momentDate }
         // What was picked belonged to the last set of results; these are a different set.
         selection.clear()
         matchedCollections = collections(matching: lowered, context: context)
-        interpretation = described.isEmpty
-            ? "Showing everything that matched."
-            : "Showing \(described.joined(separator: " · ")) — \(results.count) items."
+        interpretation = summary(of: described, count: results.count)
+    }
+
+    /// What was understood, and how much of the library it came to.
+    ///
+    /// Each understood term is fenced in first-strong isolates. The middle dot and the em dash
+    /// are both bidi-neutral, so with a right-to-left place name among the terms the runs on
+    /// either side of them were free to swap places — and a sentence that reorders itself
+    /// depending on which photographs are in the library is not a sentence. The count carries
+    /// its unit for the same reason it does everywhere else: a bare integer at the end of a
+    /// sentence is read as part of the sentence.
+    private func summary(of described: [String], count: Int) -> String {
+        let terms = described
+            .map { "\u{2068}\($0)\u{2069}" }
+            .joined(separator: " · ")
+        let items = "\(count.formatted()) \(count == 1 ? "item" : "items")"
+        return "Showing \(terms) — \(items)."
     }
 
     /// How many years back the library actually goes.
@@ -229,6 +280,72 @@ struct SearchView: View {
         )
         guard let all = try? context.fetch(descriptor) else { return [] }
         return all.filter { $0.name.lowercased().contains(term) }
+    }
+}
+
+// MARK: - A collection that matched
+
+/// One collection whose name contains what was typed.
+///
+/// A row that opens a whole collection, so it is a navigation target and has to behave like
+/// one. It was fifteen points of type with twelve above and below — forty-two, two short of
+/// the smallest thing iOS will vouch for a finger hitting, and two short while the suggestion
+/// rows six lines up in the same file already stated the floor explicitly.
+private struct CollectionMatchRow: View {
+    let collection: CollectionRecord
+
+    /// Collection names are free text the user typed, and a count pushed off the end of one is
+    /// a row that has lost half of what it says.
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        content
+            .padding(.horizontal, Space.gutter)
+            .padding(.vertical, Space.m)
+            .frame(minHeight: Hit.min)
+            .contentShape(.rect)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spokenLabel)
+    }
+
+    /// Side by side until there is no room for it, then stacked. At accessibility sizes a name
+    /// and a tally on one line are two things fighting over the same forty points.
+    @ViewBuilder
+    private var content: some View {
+        if typeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                name
+                tally
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: Space.s) {
+                name
+                Spacer(minLength: Space.s)
+                tally
+            }
+        }
+    }
+
+    private var name: some View {
+        Text(collection.name)
+            .font(Typo.label)
+            .foregroundStyle(Palette.textPrimary)
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+            .multilineTextAlignment(.leading)
+    }
+
+    private var tally: some View {
+        Text(collection.itemCount.formatted())
+            .font(Typo.meta)
+            .foregroundStyle(Palette.textTertiary)
+            .monospacedDigit()
+    }
+
+    private var spokenLabel: String {
+        let count = collection.itemCount
+        return "\(collection.name), \(count.formatted()) \(count == 1 ? "item" : "items")"
     }
 }
 

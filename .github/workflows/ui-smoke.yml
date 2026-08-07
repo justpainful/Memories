@@ -23,9 +23,16 @@ env:
 
 jobs:
   smoke:
-    name: Drive the app and photograph it
+    # Two families, because the app now declares both. A build that says it supports iPad and
+    # is never once launched on one has not been tested on an iPad, it has been assumed to work
+    # on one — and "assumed to work" is the exact failure this lane exists to catch.
+    name: Drive the app on ${{ matrix.family }} and photograph it
     runs-on: macos-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [iPhone, iPad]
 
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +48,7 @@ jobs:
         id: sim
         run: |
           set -euo pipefail
-          udid=$(xcrun simctl list devices available --json | python3 Scripts/pick_simulator.py)
+          udid=$(xcrun simctl list devices available --json | python3 Scripts/pick_simulator.py "${{ matrix.family }}")
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
           echo "Using simulator $udid"
 
@@ -143,6 +150,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: screenshots
+          name: screenshots-${{ matrix.family }}
           path: Screenshots
           retention-days: 14

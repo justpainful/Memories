@@ -5,6 +5,10 @@ import SwiftUI
 /// Short on purpose. Every switch here changes something the user can actually see.
 struct SettingsView: View {
     @Environment(\.app) private var app
+    /// How much room the floating bar is actually taking at the bottom of this screen, on this
+    /// device, at this text size. It used to be written here as `132`, a number measured once
+    /// on one phone; the bar publishes the real figure now and every screen asks for it.
+    @Environment(\.bottomBarInset) private var bottomBarInset
     @State private var confirmClearCache = false
     @State private var confirmResetSuggestions = false
     @State private var confirmReindex = false
@@ -57,11 +61,18 @@ struct SettingsView: View {
                 if app.coordinator.isRunning {
                     LabeledContent("Status", value: app.coordinator.statusLine)
                         .foregroundStyle(Palette.textSecondary)
+                        // This line changes as each stage of indexing finishes. Without the
+                        // trait a reader who lands on it hears whatever it said when they
+                        // arrived and is never told it moved on.
+                        .accessibilityAddTraits(.updatesFrequently)
                 }
             } header: {
                 Text("Library")
             } footer: {
-                Text("\(app.coordinator.indexedCount) items indexed on this iPhone.")
+                // Formatted rather than interpolated raw: a bare `\(count)` prints digits with
+                // no grouping separator and in no particular numbering system, next to dates on
+                // the same screen that are localized properly.
+                Text("\(app.coordinator.indexedCount.formatted(.number)) items indexed on this iPhone.")
             }
 
             Section("Playback") {
@@ -104,7 +115,7 @@ struct SettingsView: View {
             } header: {
                 Text("Appearance")
             } footer: {
-                Text("System sets every word in SF Pro, the iPhone's own typeface. Editorial sets memory titles, section headings and the date above the feed in New York, a serif; buttons, counts and settings stay in SF Pro either way.")
+                Text("System sets every word in SF Pro, the iPhone’s own typeface. Editorial sets memory titles, section headings and the date above the feed in New York, a serif; buttons, counts and settings stay in SF Pro either way.")
             }
 
             Section {
@@ -118,9 +129,13 @@ struct SettingsView: View {
                 Text("Clearing analysis data never touches your photos. It only removes what Memories computed, and it will be worked out again as needed.")
             }
         }
+        .contentMargins(.bottom, bottomBarInset, for: .scrollContent)
+        // A settings list stretched across a landscape iPad puts a switch a foot away from the
+        // label that names it. Content that is read stops at a comfortable measure; applied
+        // after the scroll modifiers above so they still reach the list itself.
+        .readableMeasure()
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
-        .contentMargins(.bottom, 132, for: .scrollContent)
         .confirmationDialog("Reindex your library?", isPresented: $confirmReindex, titleVisibility: .visible) {
             Button("Reindex") { Task { await app.coordinator.reindex() } }
             Button("Cancel", role: .cancel) {}
@@ -150,6 +165,7 @@ struct SettingsView: View {
 /// How often a memory may appear on the Lock Screen — local notifications, nothing else.
 struct MemoryFrequencyView: View {
     @Environment(\.app) private var app
+    @Environment(\.bottomBarInset) private var bottomBarInset
     @State private var authorization: String = "Not requested"
 
     var body: some View {
@@ -185,12 +201,13 @@ struct MemoryFrequencyView: View {
                 }
             }
         }
+        // The app draws its own floating bar over every screen, so each scrolling surface has
+        // to reserve room for it — the height the bar reported, not a number remembered from
+        // one phone at one text size.
+        .contentMargins(.bottom, bottomBarInset, for: .scrollContent)
+        .readableMeasure()
         .navigationTitle("Memory Frequency")
         .navigationBarTitleDisplayMode(.inline)
-        // The app draws its own floating bar over every screen, so each scrolling surface has
-        // to reserve room for it. Every sibling screen does; this one was missed, which left
-        // the last row sitting underneath the bar with no way to scroll it clear.
-        .contentMargins(.bottom, 132, for: .scrollContent)
         .task { authorization = await MemoryNotifications.authorizationDescription() }
     }
 

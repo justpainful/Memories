@@ -24,6 +24,21 @@ enum ImagePurpose {
         case .display:  return .highQualityFormat
         }
     }
+
+    /// The same policy for video, which Photos expresses with a different enum.
+    ///
+    /// Stated separately rather than folded into the one above because the middle rung differs:
+    /// `.automatic` — Photos deciding — is a reasonable answer while a clip is a thumbnail in a
+    /// grid, and the wrong answer the moment the user has opened it full screen and is waiting
+    /// for it. A deliberate request deserves the best rendition available, and the viewer has no
+    /// way to notice it was handed a lesser one or to ask again.
+    var videoDeliveryMode: PHVideoRequestOptionsDeliveryMode {
+        switch self {
+        case .indexing: return .fastFormat
+        case .browsing: return .automatic
+        case .display:  return .highQualityFormat
+        }
+    }
 }
 
 /// Loads and caches thumbnails, and reports which assets are not available offline.
@@ -54,6 +69,7 @@ final class PhotoImageLoader {
         if let cached = cache.object(forKey: key) { return cached }
 
         let options = Self.options(for: purpose)
+        let identifier = asset.localIdentifier
         let image: UIImage? = await withCheckedContinuation { continuation in
             var resumed = false
             manager.requestImage(for: asset,
@@ -66,7 +82,7 @@ final class PhotoImageLoader {
                 resumed = true
 
                 if (info?[PHImageResultIsInCloudKey] as? Bool) == true, image == nil {
-                    self.cloudOnlyIdentifiers.insert(asset.localIdentifier)
+                    self.recordCloudOnly(identifier)
                 }
                 continuation.resume(returning: image)
             }
@@ -121,6 +137,7 @@ final class PhotoImageLoader {
         options.deliveryMode = .highQualityFormat
         options.isNetworkAccessAllowed = purpose.allowsNetwork
 
+        let identifier = asset.localIdentifier
         return await withCheckedContinuation { continuation in
             var resumed = false
             manager.requestLivePhoto(for: asset,
@@ -130,18 +147,42 @@ final class PhotoImageLoader {
                 let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
                 guard !isDegraded, !resumed else { return }
                 resumed = true
+
+                if (info?[PHImageResultIsInCloudKey] as? Bool) == true, livePhoto == nil {
+                    self.recordCloudOnly(identifier)
+                }
                 continuation.resume(returning: livePhoto)
             }
         }
     }
 
+    /// The playable item for a clip.
+    ///
+    /// Written the same way as its two siblings above, and it was not: this one resumed its
+    /// continuation from a bare callback with no guard. Resuming a `CheckedContinuation` twice
+    /// is not a warning, it is a trap — the process dies — and Photos is entitled to call a
+    /// result handler more than once. It is also the one request the user has most obviously
+    /// asked for, which is why the delivery mode now follows the purpose rather than being
+    /// left at `.automatic` for a clip somebody has opened full screen.
     func playerItem(for asset: PHAsset, purpose: ImagePurpose = .display) async -> AVPlayerItem? {
         let options = PHVideoRequestOptions()
-        options.deliveryMode = .automatic
+        options.deliveryMode = purpose.videoDeliveryMode
         options.isNetworkAccessAllowed = purpose.allowsNetwork
 
+        let identifier = asset.localIdentifier
         return await withCheckedContinuation { continuation in
-            manager.requestPlayerItem(forVideo: asset, options: options) { item, _ in
+            var resumed = false
+            manager.requestPlayerItem(forVideo: asset, options: options) { item, info in
+                guard !resumed else { return }
+                resumed = true
+
+                // The info dictionary was being thrown away with `_`, so a clip that exists
+                // only in iCloud looked exactly like a clip that failed: nil, with nothing
+                // recorded anywhere. Now it lands in the same set every other request writes
+                // to, which is where the UI looks to explain itself.
+                if (info?[PHImageResultIsInCloudKey] as? Bool) == true, item == nil {
+                    self.recordCloudOnly(identifier)
+                }
                 continuation.resume(returning: item)
             }
         }
@@ -171,6 +212,36 @@ final class PhotoImageLoader {
     }
 
     // MARK: Plumbing
+
+    /// Note that an asset is not on the device, from wherever Photos happened to call back.
+    ///
+    /// Photos runs its result handlers on a queue of its own choosing. Writing the set directly
+    /// from a handler compiles — the handler is not `@Sendable`, so the compiler assumes it
+    /// inherits this actor — but at runtime it is a mutation of a `Set` from an arbitrary
+    /// thread while views are reading it, which is the class of race that surfaces as a crash
+    /// during a fast scroll and never once in a test. The hop costs nothing here: no caller is
+    /// waiting on the answer.
+    nonisolated private func recordCloudOnly(_ identifier: String) {
+        Task { @MainActor in self.cloudOnlyIdentifiers.insert(identifier) }
+    }
+
+    /// The pixel side to ask Photos for, rounded up onto a shared ladder.
+    ///
+    /// Two callers have to agree on this number or the warming is wasted work: `GridPrefetcher`
+    /// tells `PHCachingImageManager` to decode ahead at one size and `PhotoImageView` asks for
+    /// the tile at another, and a cached bitmap only counts if the two sizes match exactly.
+    /// Photos compares them as numbers, not as intentions. Rounding both onto the same rungs
+    /// means a tile that measures 331 points on one screen and 337 on the next still hits the
+    /// frame that was warmed for it — and the in-memory cache, whose key carries the size, stops
+    /// holding several near-identical copies of the same photograph.
+    nonisolated static func requestSide(forSide side: CGFloat, scale: CGFloat) -> CGFloat {
+        let step: CGFloat = 128
+        let pixels = max(side, 1) * max(scale, 1)
+        let rounded = (pixels / step).rounded(.up) * step
+        // The ceiling is a memory limit, not a quality one: nothing in a grid or a strip is
+        // ever drawn larger than this, and a full-screen request names its own size anyway.
+        return min(max(rounded, step), 4096)
+    }
 
     private static func options(for purpose: ImagePurpose) -> PHImageRequestOptions {
         let options = PHImageRequestOptions()

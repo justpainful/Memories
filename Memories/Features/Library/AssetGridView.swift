@@ -27,6 +27,9 @@ struct AssetGridView: View {
     var selection: PhotoSelection?
 
     @Environment(\.app) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
     /// Ties a tile to the photograph it opens, so the thumbnail grows into the full screen and
     /// shrinks back into itself instead of the viewer sliding up out of the bottom edge.
     @Namespace private var opening
@@ -36,10 +39,39 @@ struct AssetGridView: View {
     @State private var shareImage: UIImage?
     @State private var ownSelection = PhotoSelection()
     @State private var loveFailure: String?
+    @State private var shareFailure: String?
     @State private var prefetcher = GridPrefetcher()
+
+    /// The same density key `PhotoGrid` reads, for the same reason it reads it: this view has to
+    /// know how big a tile is coming out before it can ask Photos for one that size.
+    @AppStorage(PhotoGridDensity.storageKey) private var storedColumns = PhotoGridDensity.standard
+    /// The width this grid was handed, which is not the width of the device.
+    @State private var gridWidth: CGFloat = Adaptive.referenceWidth
 
     /// Whichever selection is in force: the host's if it took it on, otherwise this grid's own.
     private var picking: PhotoSelection { selection ?? ownSelection }
+
+    /// How wide one photograph is actually being drawn, right now.
+    ///
+    /// Everything that asks Photos for a bitmap has to agree on this number. It used to be
+    /// written as a literal 240 in two places, which was true at one density on one screen:
+    /// `PhotoImageView` requests `max(its own side, targetSide)` and `GridPrefetcher` warms at
+    /// exactly what it is told, so the moment a tile was not 240 points the warmed bitmap was
+    /// the wrong size and the cache served nothing. The prefetcher paid for a decode and the
+    /// grid still arrived cold — worst on the widest screens, where the tiles are largest and
+    /// the mismatch greatest.
+    ///
+    /// Derived rather than measured because `PhotoGrid` computes it from exactly these three
+    /// values, and reading them again here is cheaper than plumbing a preference back out of a
+    /// lazy grid mid-scroll.
+    private var tileSide: CGFloat {
+        let density = PhotoGridDensity.rung(nearest: storedColumns)
+        let columns = Adaptive.gridColumns(density: density, width: gridWidth)
+        let spacing = PhotoGridDensity.spacing(for: density)
+        // The grid pads by one spacing on each side and puts one between every pair of columns.
+        let chrome = spacing * CGFloat(columns + 1)
+        return max(44, (gridWidth - chrome) / CGFloat(max(1, columns)))
+    }
 
     var body: some View {
         // Mapped once per redraw, not once per tile. `onAppear` fires for every cell that
@@ -72,10 +104,31 @@ struct AssetGridView: View {
                                 .selectionOverlay(
                                     isSelecting: picking.isActive,
                                     isSelected: picking.contains(record.localIdentifier),
-                                    cornerRadius: 6
+                                    cornerRadius: 6,
+                                    tileSide: tileSide
                                 )
                         }
                         .buttonStyle(.plain)
+                        // A photograph draws nothing a screen reader can name, so without this
+                        // the library is fifteen thousand announcements of the word "Button".
+                        // The label is built from the row the app already holds, so it says
+                        // what the picture is and when it was taken — which is how anyone
+                        // tells one photograph from another.
+                        .accessibilityLabel(label(for: record))
+                        // The overlay's own trait cannot reach out here: traits set inside a
+                        // button's label do not merge into the button. Stated again on the
+                        // element VoiceOver actually focuses.
+                        .accessibilityAddTraits(
+                            picking.isActive && picking.contains(record.localIdentifier)
+                                ? [.isSelected] : []
+                        )
+                        // The context menu below is the only way to love, hide or share from a
+                        // grid. A hold does surface it under VoiceOver, but nothing tells the
+                        // reader a hold does anything — the rotor is where they look, and
+                        // without these there is nothing in it.
+                        .accessibilityActions {
+                            if !picking.isActive { rotorActions(for: record) }
+                        }
                         // Outside the button rather than inside its label. A control nested in
                         // a button's label never receives the touch — the button around it
                         // swallows every tap — so Restore on the Hidden screen looked like a
@@ -90,7 +143,7 @@ struct AssetGridView: View {
                         .onAppear {
                             prefetcher.tileAppeared(at: index,
                                                     identifiers: identifiers,
-                                                    side: 240)
+                                                    side: tileSide)
                         }
                         // Holding a tile to reach its menu would fight picking it, so the menu
                         // steps aside for as long as selection is running.
@@ -104,15 +157,21 @@ struct AssetGridView: View {
                 }
             }
         }
+        // The width the grid was handed, which is what `tileSide` is derived from. Read with
+        // `onGeometryChange` rather than a `GeometryReader`: a reader wrapped round a lazy grid
+        // claims all the space offered in both directions and collapses the scrolled height.
+        .measuringWidth($gridWidth)
         // Only for a screen that has not taken the bar on itself. Here it is part of the
         // scrolling content and travels with it; see `selection` above.
         .safeAreaInset(edge: .bottom) {
             if selection == nil, picking.isActive {
                 SelectionActionBar(selection: picking)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(reduceMotion
+                                ? .opacity
+                                : .move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.smooth(duration: 0.3), value: picking.isActive)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: picking.isActive)
         .toolbar {
             if !records.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -127,8 +186,17 @@ struct AssetGridView: View {
                 if picking.isActive {
                     ToolbarItem(placement: .principal) {
                         Text(picking.title)
-                            .font(.system(size: 17, weight: .semibold))
+                            // `.headline` rather than a fixed seventeen points: this shares a
+                            // bar with a Select/Done button that grows with the reader's text
+                            // size, and a principal item neither wraps nor gives way. At the
+                            // largest sizes "1,247 Photos Selected" would push Done off the
+                            // bar, leaving no way out of selection mode — so it is allowed to
+                            // shrink instead.
+                            .font(.headline)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                             .foregroundStyle(Palette.textPrimary)
+                            .accessibilityAddTraits(.isHeader)
                     }
                 }
             }
@@ -164,24 +232,38 @@ struct AssetGridView: View {
         }
         // Rare, and worth interrupting for: the heart has just been put back, so without this
         // the tile would silently undo what the user asked for.
-        .alert("Couldn't love that photo",
+        .alert("Couldn’t love that photo",
                isPresented: Binding(get: { loveFailure != nil },
                                     set: { if !$0 { loveFailure = nil } })) {
             Button("OK", role: .cancel) { loveFailure = nil }
         } message: {
             Text(loveFailure ?? "")
         }
+        // Share used to fail silently here — on a library kept on Optimize iPhone Storage the
+        // loader returns nothing, no sheet opened, and from the user's side the menu item was
+        // simply broken. The viewer and the batch bar both say so; the grid was the odd one out.
+        .alert("Couldn’t share that photo",
+               isPresented: Binding(get: { shareFailure != nil },
+                                    set: { if !$0 { shareFailure = nil } })) {
+            Button("OK", role: .cancel) { shareFailure = nil }
+        } message: {
+            Text(shareFailure ?? "")
+        }
         // Photos should not be left decoding ahead for a grid that is no longer on screen.
         .onDisappear { prefetcher.stop() }
     }
 
     private func tile(_ record: AssetRecord) -> some View {
-        PhotoImageView(identifier: record.localIdentifier, targetSide: 240)
+        PhotoImageView(identifier: record.localIdentifier, targetSide: tileSide)
             .aspectRatio(1, contentMode: .fill)
             .clipShape(.rect(cornerRadius: 6))
             .overlay(alignment: .bottomLeading) {
                 if record.isVideo || record.isLivePhoto {
-                    MediaBadge(record: record).padding(5)
+                    // Everything the badge says is already in the tile's own label, so as a
+                    // second element it would only add a focus stop inside one photograph.
+                    MediaBadge(record: record)
+                        .padding(5)
+                        .accessibilityHidden(true)
                 }
             }
             .overlay(alignment: .topTrailing) {
@@ -189,12 +271,63 @@ struct AssetGridView: View {
                 // where it can actually be tapped.
                 if trailingAction == nil, record.isLoved {
                     Image(systemName: "heart.fill")
-                        .font(.system(size: 11))
+                        // Chrome in the corner of a photograph: fixed by the tile's geometry,
+                        // so it does not grow with the reader's text size. "Loved" is in the
+                        // tile's accessibility label instead.
+                        .font(Typo.glyph(11, .regular))
                         .foregroundStyle(.white)
-                        .shadow(radius: 2)
+                        .padding(3)
+                        .background(heartNeedsBacking ? Palette.labelScrim : Color.clear,
+                                    in: .circle)
+                        // A shadow with no colour is black at a third opacity spread over two
+                        // points — the weakest separation in the app, under the smallest white
+                        // mark in it. Over a bright photograph the heart simply vanished, and
+                        // it is the only thing saying which pictures are loved.
+                        .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
                         .padding(5)
+                        .accessibilityHidden(true)
                 }
             }
+    }
+
+    /// A shadow is enough over most photographs. It is not what a reader who has asked for
+    /// Increase Contrast or Reduce Transparency is asking for, and the app already owns the
+    /// right token for a small white mark on an unknown picture.
+    private var heartNeedsBacking: Bool {
+        reduceTransparency || contrast == .increased
+    }
+
+    // MARK: What a tile is
+
+    /// What VoiceOver says about one photograph.
+    ///
+    /// Kind first, because it is what decides whether the rest is worth hearing; then how long,
+    /// for a clip, since duration is the thing that separates one video from the next in a run
+    /// of them; then when it was taken, which is how anyone actually identifies a photograph.
+    /// Loved comes last because it is state rather than identity.
+    ///
+    /// Every part is formatted rather than assembled from numbers, so the digits and the date
+    /// order follow the reader's locale instead of this file's.
+    private func label(for record: AssetRecord) -> String {
+        var parts: [String] = [kindName(record)]
+
+        if record.isVideo, record.duration > 0 {
+            parts.append(
+                Duration.seconds(Int(record.duration.rounded()))
+                    .formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide))
+            )
+        }
+
+        parts.append(record.momentDate.formatted(date: .abbreviated, time: .shortened))
+        if record.isLoved { parts.append("Loved") }
+        return parts.joined(separator: ", ")
+    }
+
+    private func kindName(_ record: AssetRecord) -> String {
+        if record.isVideo { return "Video" }
+        if record.isLivePhoto { return "Live Photo" }
+        if record.isScreenshot { return "Screenshot" }
+        return "Photo"
     }
 
     // MARK: Holding a thumbnail
@@ -225,6 +358,22 @@ struct AssetGridView: View {
             Button("Hide from Memories", systemImage: "eye.slash", role: .destructive) {
                 hide(record)
             }
+        }
+    }
+
+    /// The same four things, in the Actions rotor.
+    ///
+    /// Deliberately a shorter list than the context menu: the rotor is spoken one item at a
+    /// time, so it carries the actions that change something about the photograph and leaves
+    /// out "Show Similar Photos", which is a place to go rather than a thing to do and is
+    /// reachable by opening the picture.
+    @ViewBuilder
+    private func rotorActions(for record: AssetRecord) -> some View {
+        Button(record.isLoved ? "Remove from loved" : "Love") { toggleLoved(record) }
+        Button("Share") { Task { await prepareShare(record) } }
+        Button("Save to a collection") { savingFor = record.localIdentifier }
+        if !record.excludedFromMemories {
+            Button("Hide from Memories") { hide(record) }
         }
     }
 
@@ -271,14 +420,20 @@ struct AssetGridView: View {
     }
 
     /// The share sheet needs the real image, not the thumbnail already on screen, so this
-    /// waits for a full-size load. If the original cannot be fetched — an iCloud asset with
-    /// no network — nothing opens, which is quieter than a share sheet holding a blank.
+    /// waits for a full-size load. If the original cannot be fetched — an iCloud asset with no
+    /// network — the user is told. Saying nothing was the quieter choice and it was the wrong
+    /// one: from the user's side a menu item that opens nothing is indistinguishable from a
+    /// menu item that is broken.
     private func prepareShare(_ record: AssetRecord) async {
-        shareImage = await PhotoImageLoader.shared.image(
+        guard let image = await PhotoImageLoader.shared.image(
             forIdentifier: record.localIdentifier,
             targetSize: CGSize(width: 2048, height: 2048),
             purpose: .display
-        )
+        ) else {
+            shareFailure = "The original is not on this device. Connect to the internet and try again."
+            return
+        }
+        shareImage = image
     }
 }
 
@@ -293,6 +448,11 @@ struct AssetCollectionScreen: View {
     /// Owned here rather than inside the grid so the batch bar can be pinned to the screen.
     @State private var selection = PhotoSelection()
 
+    /// What the floating tab bar actually measured. A literal 132 was right on one phone at one
+    /// text size and wrong everywhere else — larger type grows the bar, landscape changes the
+    /// home-indicator inset, and inside a sheet the bar is not drawn at all.
+    @Environment(\.bottomBarInset) private var bottomBarInset
+
     var body: some View {
         ScrollView {
             AssetGridView(records: records,
@@ -300,7 +460,7 @@ struct AssetCollectionScreen: View {
                           emptyDetail: emptyDetail,
                           isLoading: isLoading,
                           selection: selection)
-                .padding(.bottom, 132)
+                .padding(.bottom, bottomBarInset)
         }
         .scrollIndicators(.hidden)
         .selectionActionBar(selection)
