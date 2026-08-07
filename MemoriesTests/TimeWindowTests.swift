@@ -161,15 +161,16 @@ struct TimeWindowTests {
         #expect(parts(leapYear.start).month == 2)
         #expect(parts(leapYear.start).day == 29)
 
-        // 2023 and 2022 have no 29th. `Calendar.interval(year:month:day:)` builds the date from
-        // raw components, and `date(from:)` does not validate — it rolls the overflow forward.
-        // So the Calendar screen, opened on a 29 February, heads a list with that date and then
-        // fills it with photographs taken on 1 March. Recorded rather than fixed: the fix
-        // belongs in the source, which this target does not touch.
-        withKnownIssue("29 February in a non-leap year does not resolve to a day in February") {
-            #expect(intervals.count == 3)
-            #expect(intervals.allSatisfy({ parts($0.start).month == 2 }))
-        }
+        // 2023 and 2022 have no 29th, so they are absent rather than approximated.
+        //
+        // This used to be a bug worth recording: `date(from:)` does not validate its
+        // components, it rolls overflow forward, so 29 February in a non-leap year came back
+        // as 1 March — and the Calendar screen would head a list "29 February" and then fill
+        // it with photographs taken on the 1st. The source now checks that the date it built
+        // is the date it asked for, and reports nothing when the day does not exist.
+        #expect(intervals.count == 1)
+        #expect(intervals.allSatisfy({ parts($0.start).month == 2 }))
+        #expect(intervals.allSatisfy({ parts($0.start).day == 29 }))
     }
 
     // MARK: Nothing resolves to nothing
