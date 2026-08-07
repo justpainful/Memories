@@ -39,10 +39,13 @@ enum MemoryKind: String, Codable, CaseIterable, Sendable {
 /// to come back tomorrow, and one that was dismissed needs a stronger reason still.
 @Model
 final class MemoryRecord {
-    #Unique<MemoryRecord>([\.id])
+    #Unique<MemoryRecord>([\.key])
     #Index<MemoryRecord>([\.referenceDate], [\.generatedAt])
 
     var id: UUID = UUID()
+    /// The candidate identity the engine generates, e.g. `onThisDay-2024`. Stable across
+    /// regenerations, which is what lets a memory keep its history when it reappears.
+    var key: String = ""
     var kindRaw: String = MemoryKind.random.rawValue
     var title: String = ""
     var subtitle: String?
@@ -64,7 +67,8 @@ final class MemoryRecord {
     var dismissed: Bool = false
     var saved: Bool = false
 
-    init(kind: MemoryKind, title: String, referenceDate: Date, assetIdentifiers: [String]) {
+    init(key: String, kind: MemoryKind, title: String, referenceDate: Date, assetIdentifiers: [String]) {
+        self.key = key
         self.kindRaw = kind.rawValue
         self.title = title
         self.referenceDate = referenceDate

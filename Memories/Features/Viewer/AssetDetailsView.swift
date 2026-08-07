@@ -117,6 +117,58 @@ struct AssetDetailsView: View {
     }
 }
 
+/// The whole occasion this photograph belongs to.
+struct EventSheet: View {
+    let identifier: String
+
+    @Environment(\.app) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var records: [AssetRecord] = []
+    @State private var title = "Occasion"
+    @State private var subtitle: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.m) {
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(Typo.meta)
+                            .foregroundStyle(Palette.textSecondary)
+                            .padding(.horizontal, Space.gutter)
+                            .padding(.top, Space.s)
+                    }
+                    AssetGridView(records: records,
+                                  emptyTitle: "This occasion is empty",
+                                  emptySymbol: "calendar.badge.clock")
+                }
+                .padding(.bottom, Space.section)
+            }
+            .background(Palette.canvas)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+        .task { load() }
+    }
+
+    private func load() {
+        let context = app.container.mainContext
+        guard let record = LibraryQuery.records(for: [identifier], context: context).first,
+              let eventID = record.eventClusterID else { return }
+
+        var descriptor = FetchDescriptor<EventCluster>(predicate: #Predicate { $0.id == eventID })
+        descriptor.fetchLimit = 1
+        guard let event = try? context.fetch(descriptor).first else { return }
+
+        records = LibraryQuery.records(for: event.assetIdentifiers, context: context)
+        title = event.placeName ?? event.startDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+        subtitle = "\(event.assetCount) moments · \(event.startDate.formatted(date: .abbreviated, time: .shortened))"
+    }
+}
+
 /// "Show all 5" — the frames that were collapsed into one best shot.
 struct SimilarPhotosView: View {
     let identifier: String

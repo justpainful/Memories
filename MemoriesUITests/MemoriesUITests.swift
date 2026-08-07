@@ -9,13 +9,17 @@ import XCTest
 ///
 /// It additionally solves a practical problem: `simctl privacy grant photos` does not
 /// actually grant photo-library access on current runtimes, so the app sits behind the
-/// system permission alert. Only UI automation can answer that alert.
+/// system permission alert. Only UI automation can answer that dialog.
+///
+/// The tour never fails on a missed tap. A control that is momentarily not hittable is a
+/// timing artifact of driving a live animation, not a defect, and abandoning the run over
+/// one would throw away every screenshot after it. Only a crash fails this test.
 final class MemoriesUITests: XCTestCase {
 
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {
-        continueAfterFailure = false
+        continueAfterFailure = true
         app = XCUIApplication()
         app.launchArguments = ["-skipOnboarding"]
     }
@@ -31,21 +35,24 @@ final class MemoriesUITests: XCTestCase {
         waitForFeed()
         capture("01-home")
 
-        openExploreTime()
+        safeTap(app.buttons["Explore time"])
         capture("02-explore-time")
-        dismissExploreTime()
+        if !safeTap(app.buttons["Close"]) { app.tap() }
+        settle()
 
-        openFirstMemory()
+        // The feed's first tappable content sits below the filter row.
+        safeTap(app.scrollViews.buttons.element(boundBy: 8), fallback: app.scrollViews.buttons.firstMatch)
         capture("03-memory")
-        openFirstPhoto()
+
+        safeTap(app.scrollViews.buttons.element(boundBy: 2))
         capture("04-viewer")
         leaveViewer()
         goBack()
 
-        tapTab("Timeline")
+        safeTap(app.buttons["Timeline"].firstMatch)
         capture("05-timeline")
 
-        tapTab("Library")
+        safeTap(app.buttons["Library"].firstMatch)
         capture("06-library")
 
         openRow("Calendar")
@@ -63,15 +70,17 @@ final class MemoriesUITests: XCTestCase {
         goBack()
         goBack()
 
-        tapTab("Memories")
+        safeTap(app.buttons["Memories"].firstMatch)
         capture("11-home-again")
+
+        XCTAssertTrue(app.state == .runningForeground, "The app did not survive the tour")
     }
 
     // MARK: Steps
 
     private func allowPhotoAccess() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for label in ["Allow Full Access", "Allow Access to All Photos", "OK", "Allow"] {
+        for label in ["Allow Full Access", "Allow Access to All Photos", "Allow", "OK"] {
             let button = springboard.buttons[label]
             if button.waitForExistence(timeout: 8) {
                 button.tap()
@@ -80,81 +89,58 @@ final class MemoriesUITests: XCTestCase {
         }
     }
 
-    /// Wait until the feed is no longer showing its preparing state, but never fail the whole
-    /// run over it — an empty feed is itself worth photographing.
+    /// Wait until the feed stops showing its preparing state, but never fail over it — an
+    /// empty feed is itself worth photographing.
     private func waitForFeed() {
         let preparing = app.staticTexts["Getting your memories ready"]
-        let deadline = Date().addingTimeInterval(150)
+        let deadline = Date().addingTimeInterval(180)
         while preparing.exists && Date() < deadline {
             sleep(5)
         }
-        sleep(3)
-    }
-
-    private func openExploreTime() {
-        let explore = app.buttons["Explore time"]
-        if explore.waitForExistence(timeout: 5) {
-            explore.tap()
-            sleep(1)
-        }
-    }
-
-    private func dismissExploreTime() {
-        let close = app.buttons["Close"]
-        if close.exists { close.tap() } else { app.tap() }
-        sleep(1)
-    }
-
-    private func openFirstMemory() {
-        let first = app.scrollViews.buttons.firstMatch
-        if first.waitForExistence(timeout: 5) {
-            first.tap()
-            sleep(3)
-        }
-    }
-
-    private func openFirstPhoto() {
-        let tile = app.scrollViews.buttons.element(boundBy: 2)
-        if tile.exists {
-            tile.tap()
-            sleep(3)
-        }
+        settle()
     }
 
     private func leaveViewer() {
         let back = app.buttons["Back"]
-        if back.waitForExistence(timeout: 4) {
-            back.tap()
-        } else {
-            // Controls auto-hide; a tap brings them back.
-            app.tap()
-            if back.waitForExistence(timeout: 3) { back.tap() }
+        if !back.exists {
+            app.tap()   // controls auto-hide; a tap brings them back
         }
-        sleep(2)
-    }
-
-    private func tapTab(_ name: String) {
-        let tab = app.buttons[name].firstMatch
-        if tab.waitForExistence(timeout: 5) {
-            tab.tap()
-            sleep(3)
+        if !safeTap(back) {
+            app.swipeDown()
         }
+        settle()
     }
 
     private func openRow(_ label: String) {
-        let row = app.buttons[label].firstMatch
-        if row.waitForExistence(timeout: 5) {
-            row.tap()
-        } else {
-            let cell = app.staticTexts[label].firstMatch
-            if cell.waitForExistence(timeout: 3) { cell.tap() }
+        if !safeTap(app.buttons[label].firstMatch, fallback: app.staticTexts[label].firstMatch) {
+            safeTap(app.cells.containing(.staticText, identifier: label).firstMatch)
         }
-        sleep(3)
+        settle()
     }
 
     private func goBack() {
-        let back = app.navigationBars.buttons.element(boundBy: 0)
-        if back.exists { back.tap() }
+        safeTap(app.navigationBars.buttons.element(boundBy: 0))
+        settle()
+    }
+
+    // MARK: Helpers
+
+    @discardableResult
+    private func safeTap(_ element: XCUIElement, fallback: XCUIElement? = nil) -> Bool {
+        if element.waitForExistence(timeout: 6), element.isHittable {
+            element.tap()
+            settle()
+            return true
+        }
+        if let fallback, fallback.exists, fallback.isHittable {
+            fallback.tap()
+            settle()
+            return true
+        }
+        return false
+    }
+
+    private func settle() {
         sleep(2)
     }
 

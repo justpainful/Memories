@@ -18,6 +18,11 @@ struct MemoryFeedback {
         let record = exposure(for: "memory:\(candidate.id)")
         record.count += 1
         record.lastShownAt = .now
+
+        let memory = memory(for: candidate)
+        memory.shownAt = .now
+        memory.shownCount += 1
+
         touchAssets(candidate.assetIdentifiers)
         context.saveIfNeeded()
     }
@@ -26,6 +31,7 @@ struct MemoryFeedback {
         let record = exposure(for: "memory:\(candidate.id)")
         record.opened += 1
         record.lastShownAt = .now
+        memory(for: candidate).opened = true
 
         let preference = context.userPreference
         preference.openedCount += 1
@@ -39,6 +45,7 @@ struct MemoryFeedback {
         let record = exposure(for: "memory:\(candidate.id)")
         record.dismissed += 1
         record.lastShownAt = .now
+        memory(for: candidate).dismissed = true
 
         let preference = context.userPreference
         preference.dismissedCount += 1
@@ -48,6 +55,8 @@ struct MemoryFeedback {
     }
 
     func recordSaved(_ candidate: MemoryCandidate) {
+        memory(for: candidate).saved = true
+
         let preference = context.userPreference
         preference.savedCount += 1
         preference.nudgeKind(candidate.kind, by: 0.05)
@@ -137,6 +146,37 @@ struct MemoryFeedback {
         )
         descriptor.fetchLimit = 1
         return try? context.fetch(descriptor).first
+    }
+
+    /// Upsert by the engine's stable candidate key, so a memory that reappears keeps the
+    /// history of how it was received rather than starting over as a stranger.
+    private func memory(for candidate: MemoryCandidate) -> MemoryRecord {
+        let key = candidate.id
+        var descriptor = FetchDescriptor<MemoryRecord>(predicate: #Predicate { $0.key == key })
+        descriptor.fetchLimit = 1
+
+        if let existing = try? context.fetch(descriptor).first {
+            existing.title = candidate.title
+            existing.subtitle = candidate.subtitle
+            existing.assetIdentifiers = candidate.assetIdentifiers
+            existing.coverIdentifier = candidate.coverIdentifier
+            existing.score = candidate.score
+            existing.generatedAt = .now
+            return existing
+        }
+
+        let created = MemoryRecord(key: key,
+                                   kind: candidate.kind,
+                                   title: candidate.title,
+                                   referenceDate: candidate.referenceDate,
+                                   assetIdentifiers: candidate.assetIdentifiers)
+        created.subtitle = candidate.subtitle
+        created.coverIdentifier = candidate.coverIdentifier
+        created.eventClusterID = candidate.eventID
+        created.placeName = candidate.placeName
+        created.score = candidate.score
+        context.insert(created)
+        return created
     }
 
     private func exposure(for key: String) -> ExposureRecord {

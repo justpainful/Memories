@@ -80,14 +80,14 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          mkdir -p Screenshots
+          mkdir -p Attachments Screenshots
           xcrun xcresulttool export attachments \
             --path Result.xcresult \
-            --output-path Screenshots >/dev/null 2>&1 || true
+            --output-path Attachments >/dev/null 2>&1 || true
 
-          # Attachments land under per-test folders with a manifest; flatten them out and
-          # give each one the name the test attached, so the artifact is readable.
-          python3 Scripts/flatten_attachments.py Screenshots
+          # The export mixes images with logs and extension-less blobs; upload only the
+          # named screenshots so the artifact is readable and the upload is predictable.
+          python3 Scripts/flatten_attachments.py Attachments Screenshots
           ls -la Screenshots
 
       - name: Check for crash reports

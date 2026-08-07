@@ -21,6 +21,8 @@ struct PhotoViewerView: View {
     @State private var showDetails = false
     @State private var shareImage: UIImage?
     @State private var similarFor: String?
+    @State private var eventFor: String?
+    @State private var dayWindow: TimeWindow?
     @State private var confirmationText: String?
 
     init(identifiers: [String], startAt: String) {
@@ -86,6 +88,15 @@ struct PhotoViewerView: View {
         )) { payload in
             ShareSheet(items: [payload.image])
         }
+        .sheet(item: Binding(
+            get: { eventFor.map(ViewerRequest.init(identifier:)) },
+            set: { eventFor = $0?.identifier }
+        )) { request in
+            EventSheet(identifier: request.identifier)
+        }
+        .sheet(item: $dayWindow) { window in
+            TimeWindowResultsView(window: window)
+        }
     }
 
     // MARK: Controls
@@ -124,8 +135,8 @@ struct PhotoViewerView: View {
                     Button("Show Similar Photos", systemImage: "square.stack.3d.down.right") {
                         similarFor = current
                     }
-                    Button("Show Event", systemImage: "calendar.badge.clock") { showDetails = true }
-                    Button("Show This Day", systemImage: "calendar") { showDetails = true }
+                    Button("Show Event", systemImage: "calendar.badge.clock") { showEvent() }
+                    Button("Show This Day", systemImage: "calendar") { showThisDay() }
                     Divider()
                     Button("Use as Cover", systemImage: "rectangle.inset.filled") { useAsCover() }
                     Button("Details", systemImage: "info.circle") { showDetails = true }
@@ -195,6 +206,21 @@ struct PhotoViewerView: View {
             context.saveIfNeeded()
             confirm("Set as cover")
         }
+    }
+
+    private func showEvent() {
+        guard let record, record.eventClusterID != nil else {
+            confirm("This photo isn't part of an occasion")
+            return
+        }
+        eventFor = current
+    }
+
+    private func showThisDay() {
+        guard let record else { return }
+        let components = Calendar.current.dateComponents([.month, .day], from: record.creationDate)
+        guard let month = components.month, let day = components.day else { return }
+        dayWindow = .dayAcrossYears(month: month, day: day)
     }
 
     /// There is no public API to deep-link a specific asset, so this opens Photos itself.

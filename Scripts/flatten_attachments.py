@@ -1,69 +1,51 @@
 #!/usr/bin/env python3
-"""Flatten xcresulttool's attachment export into readable screenshot files.
+"""Turn xcresulttool's attachment export into a clean folder of named screenshots.
 
-`xcresulttool export attachments` writes each test's attachments into per-test folders with
-opaque filenames plus a manifest.json that carries the name the test actually gave them.
-This rewrites them as `<attachment name>.png` at the top level so the CI artifact can be
-skimmed instead of decoded.
+The export mixes PNGs, logs and extension-less blobs, with names like
+`01-home_0_9A8FA12A-...png`. Uploading that folder wholesale is fragile, so this copies
+just the images out under the name the test gave them.
 
-    python3 Scripts/flatten_attachments.py Screenshots
+    python3 Scripts/flatten_attachments.py Attachments Screenshots
 """
 
 from __future__ import annotations
 
-import json
 import os
+import re
 import shutil
 import sys
 
+# `01-home_0_<uuid>.png` -> `01-home`
+NAMED = re.compile(r"^(.*?)_\d+_[0-9A-Fa-f-]{36}\.png$")
+
 
 def main() -> int:
-    root = sys.argv[1] if len(sys.argv) > 1 else "Screenshots"
-    if not os.path.isdir(root):
-        print(f"{root} is not a directory")
+    source = sys.argv[1] if len(sys.argv) > 1 else "Attachments"
+    destination = sys.argv[2] if len(sys.argv) > 2 else "Screenshots"
+    os.makedirs(destination, exist_ok=True)
+
+    if not os.path.isdir(source):
+        print(f"{source} is not a directory; nothing to flatten")
         return 0
 
-    moved = 0
-    for directory, _, files in os.walk(root):
-        if "manifest.json" not in files:
-            continue
-        with open(os.path.join(directory, "manifest.json"), encoding="utf-8") as handle:
-            manifest = json.load(handle)
-
-        # The manifest shape has changed across Xcode versions; handle both a top-level list
-        # and a dict of test identifiers to attachment lists.
-        entries = manifest if isinstance(manifest, list) else manifest.values()
-        for entry in entries:
-            attachments = entry.get("attachments", []) if isinstance(entry, dict) else []
-            for attachment in attachments:
-                exported = attachment.get("exportedFileName")
-                name = attachment.get("suggestedHumanReadableName") or attachment.get("name")
-                if not exported or not name:
-                    continue
-                source = os.path.join(directory, exported)
-                if not os.path.exists(source):
-                    continue
-                stem = os.path.splitext(name)[0]
-                target = os.path.join(root, f"{stem}.png")
-                shutil.copyfile(source, target)
-                moved += 1
-
-    print(f"flattened {moved} attachments into {root}")
-
-    # Anything the manifest did not describe is still worth keeping; surface it by copying
-    # every png found deeper in the tree up to the top level under a generic name.
-    if moved == 0:
-        index = 0
-        for directory, _, files in os.walk(root):
-            if os.path.abspath(directory) == os.path.abspath(root):
+    copied = 0
+    fallback = 0
+    for directory, _, files in os.walk(source):
+        for name in sorted(files):
+            if not name.lower().endswith(".png"):
                 continue
-            for name in sorted(files):
-                if name.lower().endswith(".png"):
-                    shutil.copyfile(os.path.join(directory, name),
-                                    os.path.join(root, f"attachment-{index:02d}.png"))
-                    index += 1
-        print(f"no manifest entries; copied {index} raw png attachments")
+            path = os.path.join(directory, name)
+            match = NAMED.match(name)
+            if match:
+                target = os.path.join(destination, f"{match.group(1)}.png")
+                copied += 1
+            else:
+                # Unnamed attachment — still worth keeping, just less useful.
+                target = os.path.join(destination, f"unnamed-{fallback:02d}.png")
+                fallback += 1
+            shutil.copyfile(path, target)
 
+    print(f"copied {copied} named and {fallback} unnamed screenshots into {destination}")
     return 0
 
 
