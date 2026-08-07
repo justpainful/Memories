@@ -11,7 +11,7 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-            Section("Memories") {
+            Section {
                 Toggle("Smart Curation", isOn: Binding(
                     get: { app.settings.smartCuration },
                     set: { app.settings.smartCuration = $0 }
@@ -33,11 +33,13 @@ struct SettingsView: View {
                 } label: {
                     LabeledContent("Memory Frequency", value: app.settings.memoryFrequency.title)
                 }
+            } header: {
+                Text("Memories")
             } footer: {
                 Text("Smart Curation collapses near-identical shots to the best one and keeps weak frames out of memories. Turning it off shows everything, in order.")
             }
 
-            Section("Library") {
+            Section {
                 LabeledContent("Photo Access", value: app.library.access.title)
                 if app.library.access != .full {
                     Button("Change in Settings") { openSystemSettings() }
@@ -47,6 +49,8 @@ struct SettingsView: View {
                     LabeledContent("Status", value: app.coordinator.statusLine)
                         .foregroundStyle(Palette.textSecondary)
                 }
+            } header: {
+                Text("Library")
             } footer: {
                 Text("\(app.coordinator.indexedCount) items indexed on this iPhone.")
             }
@@ -78,11 +82,13 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
             }
 
-            Section("Privacy") {
+            Section {
                 NavigationLink("Local Processing") { PrivacyView() }
                 NavigationLink("Storage") { StorageView() }
                 Button("Reset Memory Suggestions") { confirmResetSuggestions = true }
                 Button("Clear Analysis Data", role: .destructive) { confirmClearCache = true }
+            } header: {
+                Text("Privacy")
             } footer: {
                 Text("Clearing analysis data never touches your photos. It only removes what Memories computed, and it will be worked out again as needed.")
             }

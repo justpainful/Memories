@@ -18,23 +18,29 @@ struct PrivacyView: View {
                 LabeledContent("Analyzed with Vision", value: "\(withFeatures)")
             }
 
-            Section("Leaving this device") {
+            Section {
                 LabeledContent("Photos uploaded", value: "0")
                 LabeledContent("External AI services", value: "None")
                 LabeledContent("External analytics", value: "None")
                 LabeledContent("Accounts", value: "None")
+            } header: {
+                Text("Leaving this device")
             } footer: {
                 Text("Memories has no backend and no sign-in. Photo analysis uses Apple's Vision framework on this device.")
             }
 
-            Section("The one exception") {
+            Section {
                 LabeledContent("Place names", value: "Apple geocoder")
+            } header: {
+                Text("The one exception")
             } footer: {
                 Text("When you open a photo's details and it has coordinates saved by your camera, those coordinates are sent to Apple's geocoding service to turn them into a place name. The photo itself is never sent. Everything else happens offline.")
             }
 
-            Section("Your library") {
+            Section {
                 LabeledContent("Photos copied by Memories", value: "0")
+            } header: {
+                Text("Your library")
             } footer: {
                 Text("Memories stores identifiers and computed details, never a second copy of your photos. Hiding a photo from Memories does not delete it, and the app never modifies your library.")
             }

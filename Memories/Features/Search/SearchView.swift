@@ -155,7 +155,9 @@ struct SearchView: View {
     }
 
     private func collections(matching term: String, context: ModelContext) -> [CollectionRecord] {
-        let descriptor = FetchDescriptor<CollectionRecord>(sort: [SortDescriptor(\.sortIndex)])
+        let descriptor = FetchDescriptor<CollectionRecord>(
+            sortBy: [SortDescriptor(\CollectionRecord.sortIndex)]
+        )
         guard let all = try? context.fetch(descriptor) else { return [] }
         return all.filter { $0.name.lowercased().contains(term) }
     }
