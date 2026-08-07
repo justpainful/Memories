@@ -16,6 +16,7 @@ final class AppSettings {
     var includeDownloads: Bool { didSet { store(includeDownloads, "includeDownloads") } }
     var memoryFrequency: MemoryFrequency { didSet { store(memoryFrequency.rawValue, "memoryFrequency") } }
     var reminderHour: Int { didSet { store(reminderHour, "reminderHour") } }
+    var videoMix: VideoMix { didSet { store(videoMix.rawValue, "videoMix") } }
 
     // Playback
     var autoplayVideos: Bool { didSet { store(autoplayVideos, "autoplayVideos") } }
@@ -47,6 +48,7 @@ final class AppSettings {
         memoryFrequency = MemoryFrequency(rawValue: defaults.string(forKey: "memoryFrequency") ?? "")
             ?? .off
         reminderHour = defaults.object(forKey: "reminderHour") as? Int ?? 9
+        videoMix = VideoMix(rawValue: defaults.string(forKey: "videoMix") ?? "") ?? .balanced
         autoplayVideos = defaults.object(forKey: "autoplayVideos") as? Bool ?? true
         playLivePhotos = defaults.object(forKey: "playLivePhotos") as? Bool ?? true
         playAudio = defaults.object(forKey: "playAudio") as? Bool ?? false
@@ -65,7 +67,8 @@ final class AppSettings {
             includeScreenshots: includeScreenshots,
             includeScreenRecordings: includeScreenRecordings,
             includeDownloads: includeDownloads,
-            includeHiddenFromMemories: false
+            includeHiddenFromMemories: false,
+            videoMix: videoMix
         )
     }
 
@@ -76,6 +79,37 @@ final class AppSettings {
         case .dark:   return .dark
         }
     }
+}
+
+/// How much of a memory may be video.
+///
+/// Most libraries hold far more photographs than clips, so left to quality scoring alone a
+/// memory is almost always stills — and the app was deciding that silently, with no way to say
+/// otherwise. This is the say. It is a ceiling rather than a quota: a day with no video still
+/// produces a memory of photographs, and asking for more video never invents any.
+enum VideoMix: String, CaseIterable, Sendable {
+    case rarely, balanced, often
+
+    var title: String {
+        switch self {
+        case .rarely:   return "Rarely"
+        case .balanced: return "Balanced"
+        case .often:    return "Often"
+        }
+    }
+
+    /// The largest share of one memory that may be video.
+    var ceiling: Double {
+        switch self {
+        case .rarely:   return 0.05
+        case .balanced: return 0.35
+        case .often:    return 0.75
+        }
+    }
+
+    /// Whether a memory that lost all its clips to quality scoring gets its best one back.
+    /// A clip carries a moment stills cannot, so this is on unless the user asked otherwise.
+    var reinstatesOne: Bool { self != .rarely }
 }
 
 enum AppearanceChoice: String, CaseIterable, Sendable {

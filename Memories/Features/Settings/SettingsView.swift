@@ -28,6 +28,15 @@ struct SettingsView: View {
                     get: { app.settings.includeDownloads },
                     set: { app.settings.includeDownloads = $0 }
                 ))
+                Picker("Video in Memories", selection: Binding(
+                    get: { app.settings.videoMix },
+                    set: { app.settings.videoMix = $0 }
+                )) {
+                    ForEach(VideoMix.allCases, id: \.self) { mix in
+                        Text(mix.title).tag(mix)
+                    }
+                }
+                .pickerStyle(.menu)
                 NavigationLink {
                     MemoryFrequencyView()
                 } label: {
@@ -36,7 +45,7 @@ struct SettingsView: View {
             } header: {
                 Text("Memories")
             } footer: {
-                Text("Smart Curation collapses near-identical shots to the best one and keeps weak frames out of memories. Turning it off shows everything, in order.")
+                Text("Smart Curation collapses near-identical shots to the best one and keeps weak frames out of memories. Turning it off shows everything, in order.\n\nVideo in Memories is a ceiling, not a quota: most libraries hold far more photos than clips, so asking for more video shows the clips you have rather than inventing any. It changes memories only — the Videos screen always shows everything.")
             }
 
             Section {

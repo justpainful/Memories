@@ -129,9 +129,18 @@ enum DeviceConditions {
     }
 
     /// Human-readable reason, for the indexing status line in Settings.
+    /// What to tell the user, in words about their phone rather than about the pass.
+    ///
+    /// `.reduced` gets a line even though nothing is paused, and it is the important one: it is
+    /// the state the app spends most of its life in, because it is what "on screen, on battery"
+    /// now means. A library of tens of thousands of photographs takes a long time at that pace,
+    /// and an app that goes quiet for that long is an app the user reasonably concludes has
+    /// frozen. Saying that it is deliberate, and naming the one thing that makes it finish
+    /// sooner, is the difference between patience and a bug report.
     static func explanation(for allowance: WorkAllowance) -> String? {
         switch allowance {
-        case .full, .reduced: return nil
+        case .full:           return nil
+        case .reduced:        return "Working gently while you use your iPhone · faster on charge"
         case .metadataOnly:   return "Paused heavy analysis to save power"
         case .suspended:      return "Paused while your iPhone cools down"
         }

@@ -41,6 +41,9 @@ struct CurationOptions: Sendable, Equatable {
     var includeCloudOnly = false
     /// Hidden means hidden from Memories, never deleted. Only the Hidden screen sets this.
     var includeHiddenFromMemories = false
+    /// How much of a memory may be video. Browsing ignores it — a filter that quietly withheld
+    /// clips from the Videos screen would be a bug, not a preference.
+    var videoMix: VideoMix = .balanced
 
     static let feed = CurationOptions()
     static let browsing = CurationOptions(mode: .pure, includeScreenshots: true,
@@ -162,9 +165,14 @@ enum Curator {
         // 3. Stop one burst of shooting from becoming the whole memory.
         kept = limitClusterDominance(kept)
 
-        // 4. Keep at least one video if the occasion had any: a clip carries a moment that
-        //    stills cannot, and quality scoring alone tends to bury them.
-        kept = reinstateVideo(from: assets, into: kept)
+        // 4. Hold video to the share the user asked for, in both directions: trim it back when
+        //    a day of filming would otherwise crowd out the photographs, and put the best clip
+        //    back when quality scoring buried every one of them. A clip carries a moment stills
+        //    cannot, which is why the floor exists at all.
+        kept = limitVideoShare(kept, to: options.videoMix)
+        if options.videoMix.reinstatesOne {
+            kept = reinstateVideo(from: assets, into: kept)
+        }
 
         return kept.sorted { $0.momentDate < $1.momentDate }
     }
@@ -183,6 +191,26 @@ enum Curator {
             result.append(asset)
         }
         return result
+    }
+
+    /// Trims video down to its allowed share, keeping the best clips.
+    ///
+    /// The ceiling is measured against the photographs rather than against the whole memory, so
+    /// that dropping a clip cannot lower the allowance and cause another to be dropped. An
+    /// occasion that is *only* video is left alone: the alternative is an empty memory.
+    private static func limitVideoShare(_ kept: [AssetRecord], to mix: VideoMix) -> [AssetRecord] {
+        let videos = kept.filter(\.isVideo)
+        let stills = kept.count - videos.count
+        guard stills > 0, !videos.isEmpty else { return kept }
+
+        let allowed = max(mix.reinstatesOne ? 1 : 0,
+                          Int((Double(stills) * mix.ceiling).rounded()))
+        guard videos.count > allowed else { return kept }
+
+        let survivors = Set(videos.sorted { $0.memoryScore > $1.memoryScore }
+                                  .prefix(allowed)
+                                  .map(\.localIdentifier))
+        return kept.filter { !$0.isVideo || survivors.contains($0.localIdentifier) }
     }
 
     private static func reinstateVideo(from source: [AssetRecord],
