@@ -404,7 +404,11 @@ final class AnalysisCoordinator {
             handled.updated += await analyze(pending, allowance: allowance, through: indexer)
         }
 
-        let dates = changed.map(\.momentDate) + removal.dates
+        // Snapshots carry the library's own date and nothing else — a truer capture date is
+        // only recovered later, in the pixel pass. Repairing the cluster window around where
+        // Photos filed the change is correct, and the pass that corrects the date repairs
+        // that window again.
+        let dates = changed.map(\.creationDate) + removal.dates
         await indexer.rebuildClusters(around: dates, accountingFor: handled)
     }
 }

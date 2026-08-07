@@ -34,6 +34,7 @@ struct RootView: View {
     @State private var selection: AppTab = LaunchOptions.startTab ?? .memories
     @State private var isExploring = false
     @State private var exploreDestination: TimeWindow?
+    @State private var intentMemory: MemoryCandidate?
 
     var body: some View {
         Group {
@@ -46,6 +47,22 @@ struct RootView: View {
         }
         .animation(.smooth(duration: 0.35), value: shouldShowOnboarding)
         .preferredColorScheme(app.settings.preferredColorScheme)
+        .sheet(item: $intentMemory) { candidate in
+            NavigationStack {
+                MemoryDetailView(candidate: candidate)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { intentMemory = nil }
+                        }
+                    }
+            }
+        }
+        // Drained on appearance as well as on arrival: a cold launch runs the intent before
+        // this view exists, so by the time it does the request is already waiting.
+        .task { await handleIntent() }
+        .onChange(of: MemoryIntentRouter.shared.request) { _, _ in
+            Task { await handleIntent() }
+        }
         .task {
             BackgroundWork.register(app: app)
             // Skipping onboarding means behaving as if it had been completed, and completing
@@ -69,6 +86,18 @@ struct RootView: View {
             default:
                 break
             }
+        }
+    }
+
+    @MainActor
+    private func handleIntent() async {
+        guard let target = MemoryIntentRouter.shared.take() else { return }
+        switch target {
+        case .window(let window):
+            isExploring = false
+            exploreDestination = window
+        case .topMemory:
+            intentMemory = await MemoryIntentRouter.topMemory(app: app)
         }
     }
 

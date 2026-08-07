@@ -1,3 +1,4 @@
+import Photos
 import SwiftData
 import SwiftUI
 
@@ -76,16 +77,60 @@ struct LibraryView: View {
         }
     }
 
+    /// Six numbers, none of which need a photo.
+    ///
+    /// `CurationOptions.browsing` admits screenshots, screen recordings, downloads and
+    /// cloud-only assets, so for these four `LibraryQuery.passes` reduces to "not hidden, and
+    /// the right media type" — a question SQLite answers with a count instead of fifteen
+    /// thousand objects.
     private func load() {
         let context = app.container.mainContext
-        let all = LibraryQuery.allRecords(context: context)
-        hiddenCount = all.filter(\.excludedFromMemories).count
+        let photo = PHAssetMediaType.image.rawValue
+        let video = PHAssetMediaType.video.rawValue
 
-        for filter in MediaFilter.allCases {
-            var options = CurationOptions.browsing
-            options.media = filter
-            counts[filter] = all.filter { LibraryQuery.passes($0, options: options) }.count
+        hiddenCount = count(#Predicate<AssetRecord> { $0.excludedFromMemories }, in: context)
+        counts[.all] = count(#Predicate<AssetRecord> { $0.excludedFromMemories == false },
+                             in: context)
+        counts[.photos] = count(#Predicate<AssetRecord> {
+            $0.excludedFromMemories == false && $0.mediaTypeRaw == photo
+        }, in: context)
+        counts[.videos] = count(#Predicate<AssetRecord> {
+            $0.excludedFromMemories == false && $0.mediaTypeRaw == video
+        }, in: context)
+
+        let container = app.container
+        Task { @MainActor in
+            let subtypes = await SubtypeCounter(modelContainer: container).counts()
+            counts[.livePhotos] = subtypes.live
+            counts[.screenshots] = subtypes.screenshots
         }
+    }
+
+    private func count(_ predicate: Predicate<AssetRecord>, in context: ModelContext) -> Int {
+        (try? context.fetchCount(FetchDescriptor<AssetRecord>(predicate: predicate))) ?? 0
+    }
+}
+
+/// The two counts that cannot be asked for.
+///
+/// Live Photo and screenshot are bits inside `mediaSubtypesRaw`, and `#Predicate` has no
+/// bitwise operator, so these two genuinely need the rows in memory. One pass produces both,
+/// on a background context, which is why they arrive a moment after the numbers above them.
+@ModelActor
+private actor SubtypeCounter {
+    func counts() -> (live: Int, screenshots: Int) {
+        let descriptor = FetchDescriptor<AssetRecord>(
+            predicate: #Predicate { $0.excludedFromMemories == false }
+        )
+        guard let records = try? modelContext.fetch(descriptor) else { return (0, 0) }
+
+        var live = 0
+        var screenshots = 0
+        for record in records {
+            if record.isLivePhoto { live += 1 }
+            if record.isScreenshot { screenshots += 1 }
+        }
+        return (live, screenshots)
     }
 }
 

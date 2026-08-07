@@ -51,10 +51,14 @@ struct PrivacyView: View {
         .task { load() }
     }
 
+    /// Two numbers, so two counts. Assembling them from rows would materialise the whole
+    /// library — including every feature print — to print a pair of integers.
     private func load() {
-        let records = LibraryQuery.allRecords(context: app.container.mainContext)
-        processed = records.count
-        withFeatures = records.filter { $0.featurePrint != nil }.count
+        let context = app.container.mainContext
+        processed = (try? context.fetchCount(FetchDescriptor<AssetRecord>())) ?? 0
+        withFeatures = (try? context.fetchCount(
+            FetchDescriptor<AssetRecord>(predicate: #Predicate { $0.featurePrint != nil })
+        )) ?? 0
     }
 }
 
@@ -107,21 +111,18 @@ struct StorageView: View {
     }
 
     private func load() {
-        let records = LibraryQuery.allRecords(context: app.container.mainContext)
-        recordCount = records.count
-        analysisBytes = Self.featurePrintSize(records)
+        let context = app.container.mainContext
+        recordCount = (try? context.fetchCount(FetchDescriptor<AssetRecord>())) ?? 0
         databaseBytes = Self.storeSize()
+
+        let container = app.container
+        Task { @MainActor in
+            analysisBytes = await AnalysisCacheSize(modelContainer: container).totalBytes()
+        }
     }
 
     private func format(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
-    }
-
-    /// Feature prints are the only derived data large enough to be worth a line of its own.
-    /// The scores and group assignments beside them are a handful of numbers per row, and they
-    /// sit in the same store file, so they are already counted in the database figure.
-    private static func featurePrintSize(_ records: [AssetRecord]) -> Int64 {
-        records.reduce(Int64(0)) { $0 + Int64($1.featurePrint?.count ?? 0) }
     }
 
     /// SwiftData writes a SQLite store plus its journal files into Application Support.
@@ -138,5 +139,25 @@ struct StorageView: View {
                 let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                 return total + Int64(size)
             }
+    }
+}
+
+/// Feature prints are the only derived data large enough to be worth a line of its own. The
+/// scores and group assignments beside them are a handful of numbers per row, and they sit in
+/// the same store file, so they are already counted in the database figure.
+///
+/// This is the one figure on the screen that cannot be asked for: SwiftData offers no way to
+/// have SQLite sum the length of a blob column, so an honest total means reading every print
+/// back — tens of megabytes on a large library, to produce one line of text. It is at least
+/// paid on a background context, narrowed to the rows that have a print, and only the total
+/// crosses back to the screen.
+@ModelActor
+private actor AnalysisCacheSize {
+    func totalBytes() -> Int64 {
+        let descriptor = FetchDescriptor<AssetRecord>(
+            predicate: #Predicate { $0.featurePrint != nil }
+        )
+        guard let records = try? modelContext.fetch(descriptor) else { return 0 }
+        return records.reduce(Int64(0)) { $0 + Int64($1.featurePrint?.count ?? 0) }
     }
 }

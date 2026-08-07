@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import Vision
 
@@ -39,17 +40,27 @@ struct FeatureVector: Sendable, Equatable {
     // MARK: Comparison
 
     /// Cosine similarity in 0...1. Feature prints are non-negative, so this stays in range.
+    ///
+    /// This is the busiest arithmetic in the app — similarity clustering runs it a dozen times
+    /// per asset and people clustering runs it again for every face — so 768 dimensions go
+    /// through vDSP rather than a Swift loop.
+    ///
+    /// Single precision costs nothing here: the values were rounded to half precision on the
+    /// way to disk, so they already carry error far larger than a Float accumulation adds.
+    /// Both magnitudes come from the same dot product rather than a sum-of-squares routine,
+    /// because that is what guarantees a vector compared against itself gets the identical
+    /// number three times and answers exactly 1.
     func similarity(to other: FeatureVector) -> Double {
         guard values.count == other.values.count, !values.isEmpty else { return 0 }
-        var dot: Double = 0, lhs: Double = 0, rhs: Double = 0
-        for index in values.indices {
-            let a = Double(values[index]), b = Double(other.values[index])
-            dot += a * b
-            lhs += a * a
-            rhs += b * b
-        }
+
+        let length = vDSP_Length(values.count)
+        var dot: Float = 0, lhs: Float = 0, rhs: Float = 0
+        vDSP_dotpr(values, 1, other.values, 1, &dot, length)
+        vDSP_dotpr(values, 1, values, 1, &lhs, length)
+        vDSP_dotpr(other.values, 1, other.values, 1, &rhs, length)
+
         guard lhs > 0, rhs > 0 else { return 0 }
-        return max(0, min(1, dot / (lhs.squareRoot() * rhs.squareRoot())))
+        return max(0, min(1, Double(dot) / (Double(lhs).squareRoot() * Double(rhs).squareRoot())))
     }
 }
 
