@@ -90,12 +90,25 @@ enum VisionAnalyzer {
 /// The shared `PhotoImageLoader` is main-actor bound and keeps a UI cache; indexing wants
 /// neither, so it has its own tiny path that never warms that cache.
 enum IndexingImageProvider {
-    /// `nil` here means "not available on this device", which is a normal outcome for an
-    /// iCloud-only asset, not an error. Such assets keep their metadata and skip pixel work.
-    static func image(for asset: PHAsset, side: CGFloat = 512) async -> UIImage? {
+
+    /// Why a frame could not be analyzed, which is not the same question as whether it failed.
+    enum Outcome {
+        case image(UIImage)
+        /// The original lives only in iCloud. Expected, and not an error: indexing does not
+        /// download, so the asset keeps its metadata and stops being offered pixel work.
+        case inCloud
+        /// Photos could not produce a frame for some other reason. Distinguished from
+        /// `inCloud` because conflating them was hiding assets from every memory: a single
+        /// hiccup marked a perfectly local photo as unavailable, permanently.
+        case unavailable
+    }
+
+    static func image(for asset: PHAsset, side: CGFloat = 512) async -> Outcome {
         let options = PHImageRequestOptions()
         options.isNetworkAccessAllowed = false     // never pull originals down while indexing
-        options.deliveryMode = .fastFormat
+        // High quality rather than fast: `.fastFormat` can deliver a single result flagged
+        // degraded, which a "wait for the final callback" guard then waits for forever.
+        options.deliveryMode = .highQualityFormat
         options.resizeMode = .fast
         options.isSynchronous = false
 
@@ -110,7 +123,14 @@ enum IndexingImageProvider {
                 let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
                 guard !degraded, !resumed else { return }
                 resumed = true
-                continuation.resume(returning: image)
+
+                if let image {
+                    continuation.resume(returning: .image(image))
+                } else if (info?[PHImageResultIsInCloudKey] as? Bool) == true {
+                    continuation.resume(returning: .inCloud)
+                } else {
+                    continuation.resume(returning: .unavailable)
+                }
             }
         }
     }

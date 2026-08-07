@@ -135,6 +135,16 @@ actor LibraryIndexer {
         modelContext.saveIfNeeded()
     }
 
+    /// The frame could not be read, but the asset is here. It stops being offered pixel work
+    /// so the queue drains, and keeps a neutral score so it can still appear in a memory —
+    /// unlike an iCloud-only asset, there is nothing stopping it being shown.
+    func markUnscorable(_ identifier: String) {
+        guard let record = record(for: identifier) else { return }
+        record.analysisVersion = currentAnalysisVersion
+        if record.memoryScore == 0 { record.memoryScore = 0.45 }
+        modelContext.saveIfNeeded()
+    }
+
     private func inputs(for record: AssetRecord, analysis: FrameAnalysis) -> QualityInputs {
         QualityInputs(
             aesthetics: analysis.aesthetics,

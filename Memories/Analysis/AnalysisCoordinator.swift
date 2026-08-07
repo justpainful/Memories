@@ -170,16 +170,26 @@ final class AnalysisCoordinator {
             for identifier in batch {
                 guard !Task.isCancelled else { return }
                 guard let asset = assets[identifier] else {
-                    await indexer.markUnavailable(identifier)
+                    await indexer.markUnscorable(identifier)
                     continue
                 }
-                guard let image = await IndexingImageProvider.image(for: asset) else {
-                    // Only in iCloud. Catalogued, not downloaded.
+
+                switch await IndexingImageProvider.image(for: asset) {
+                case .image(let image):
+                    let analysis = await VisionAnalyzer.analyze(image)
+                    await indexer.store(analysis, for: identifier)
+
+                case .inCloud:
+                    // Catalogued, not downloaded. It genuinely cannot be shown offline, so
+                    // it stays out of memories until it comes back.
                     await indexer.markUnavailable(identifier)
-                    continue
+
+                case .unavailable:
+                    // Present but unreadable this time. It keeps its place in the library —
+                    // treating a failed thumbnail request as "not on this device" used to
+                    // remove the photo from every memory for good.
+                    await indexer.markUnscorable(identifier)
                 }
-                let analysis = await VisionAnalyzer.analyze(image)
-                await indexer.store(analysis, for: identifier)
             }
 
             remaining = max(0, remaining - batch.count)
