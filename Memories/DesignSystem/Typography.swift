@@ -65,9 +65,23 @@ enum Space {
 }
 
 /// Corner radii, fixed per surface kind so related elements stay visually related.
+///
+/// Nesting rule: a radius drawn inside another should be the outer one less the padding
+/// between them, or smaller. Going the other way — a tight outer corner around a rounder
+/// inner one — is what makes a panel look like it is squeezing its contents.
 enum Radius {
     static let hero: CGFloat = 28
     static let card: CGFloat = 22
+
+    /// A small floating glass panel: a confirmation caption, the year scrubber, a batch-action
+    /// cluster. Chrome laid over content rather than content itself, so it is tighter than a
+    /// card and never as open as a hero.
+    static let panel: CGFloat = 18
+
     static let tile: CGFloat = 14
     static let thumb: CGFloat = 10
+
+    /// One photograph in a dense grid. Nearly square on purpose — at seven across anything
+    /// rounder stops reading as photographs and starts reading as a sheet of lozenges.
+    static let gridTile: CGFloat = 6
 }

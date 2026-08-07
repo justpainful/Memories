@@ -25,6 +25,12 @@ enum Palette {
 
     /// Scrim over photography so overlaid type stays legible without dimming the image.
     static let photoScrim = Color.black.opacity(0.34)
+
+    /// The heavier scrim a small label needs when it sits directly on a photograph — the
+    /// duration on a video thumbnail, which is eleven-point white type over an unknown
+    /// picture. `photoScrim` is tuned for veiling a whole frame; at that strength a badge this
+    /// small disappears into a bright one.
+    static let labelScrim = Color.black.opacity(0.55)
 }
 
 extension Color {

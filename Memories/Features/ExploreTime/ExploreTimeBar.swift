@@ -17,15 +17,21 @@ struct ExploreTimeBar: View {
     @Namespace private var glass
 
     var body: some View {
-        GlassEffectContainer(spacing: 22) {
+        // The container's spacing is the distance at which two pieces of glass start reaching
+        // for each other, and it is deliberately *below* the gap between the bar and the
+        // Explore button. At twenty-two against a gap of eighteen they were permanently joined
+        // by a liquid bridge, so the bottom of every screen was one wide smear rather than two
+        // controls. It has nothing to do with the morph: that is carried by `glassEffectID`,
+        // which does not care how far apart the two states are.
+        GlassEffectContainer(spacing: Space.m) {
             if isExploring {
                 // The panel sits over dimmed content and holds a list, so it keeps the
                 // regular material: clear glass here would make its rows hard to read.
                 panel
-                    .glassEffect(.regular, in: .rect(cornerRadius: 30))
+                    .glassEffect(.regular, in: .rect(cornerRadius: Radius.hero))
                     .glassEffectID("bar", in: glass)
             } else {
-                HStack(spacing: 18) {
+                HStack(spacing: Space.l) {
                     // Regular, not clear. Clear glass was tried here and the screenshots
                     // settled it: the bar floats over a full-bleed photograph that can be any
                     // colour, and against a dark one the unselected labels became grey text
@@ -45,6 +51,10 @@ struct ExploreTimeBar: View {
         }
         .padding(.horizontal, Space.gutter)
         .padding(.bottom, Space.s)
+        // `RootView` animates the same value on the layer above, for the dim behind this bar.
+        // The innermost one wins inside its own subtree, so the two are not competing — but
+        // they do have to stay the same curve and the same duration, or the panel and the dim
+        // it sits on will arrive at different moments.
         .animation(.smooth(duration: 0.42), value: isExploring)
     }
 
@@ -76,6 +86,12 @@ struct ExploreTimeBar: View {
                                 .matchedGeometryEffect(id: "tabPill", in: glass)
                         }
                     }
+                    // Each tab claims a third of the bar, but only the glyph and its label
+                    // answered a finger: `frame` gives a view its size, never its touch area,
+                    // and the selection pill that would have carried one is drawn for the
+                    // selected tab only. So taps a few points to either side of "Timeline" did
+                    // nothing at all — which from the outside is a bar that sticks.
+                    .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selection == tab ? [.isSelected] : [])
@@ -94,6 +110,9 @@ struct ExploreTimeBar: View {
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(Palette.accent)
                 .frame(width: 56, height: 56)
+                // Fifty-six points of glass around an eighteen-point glyph, and only the glyph
+                // was taking the touch. See `tabs`.
+                .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Explore time")
@@ -130,9 +149,12 @@ struct ExploreTimeBar: View {
                         if index > 0 { GlassDivider().padding(.vertical, Space.s) }
                         ForEach(group) { window in
                             Button {
+                                // Ahead of the state changes rather than after them, so the
+                                // tap is felt when the finger lands instead of once the panel
+                                // has already started folding away.
+                                Haptics.impact()
                                 isExploring = false
                                 onSelectWindow(window)
-                                Haptics.impact()
                             } label: {
                                 HStack {
                                     Text(window.title)
@@ -144,7 +166,10 @@ struct ExploreTimeBar: View {
                                         .foregroundStyle(Palette.textTertiary)
                                 }
                                 .padding(.horizontal, Space.l)
-                                .padding(.vertical, 11)
+                                // Eleven points above and below a sixteen-point line is a
+                                // forty-two point row, and every row in this panel is a
+                                // destination. Two short is still short.
+                                .frame(minHeight: 44)
                                 .contentShape(.rect)
                             }
                             .buttonStyle(.plain)

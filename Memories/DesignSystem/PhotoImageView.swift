@@ -105,8 +105,8 @@ struct MediaBadge: View {
         .labelStyle(.titleAndIcon)
         .foregroundStyle(.white)
         .padding(.horizontal, Space.s)
-        .padding(.vertical, 4)
-        .background(Color.black.opacity(0.45), in: .capsule)
+        .padding(.vertical, Space.xs)
+        .background(Palette.labelScrim, in: .capsule)
     }
 }
 

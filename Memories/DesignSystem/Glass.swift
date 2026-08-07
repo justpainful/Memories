@@ -32,6 +32,22 @@ enum GlassShape {
 enum GlassTone {
     case regular
     case clear
+
+    /// The material this tone actually draws with.
+    ///
+    /// Clear is handed a low black tint rather than used bare. Clear makes no promise about
+    /// legibility — that is precisely the trade it offers, and the reason it is confined to
+    /// controls over media — so the moment the photograph underneath is a bright one, the
+    /// white glyphs and captions drawn on it have nothing left to stand against. A snowfield,
+    /// a white wall or a blown-out sky is not an edge case in a photo viewer; it is Tuesday.
+    /// The tint is a fraction of what the regular material does, so the picture is still the
+    /// brightest thing on screen, which was the whole reason clear was chosen there.
+    var material: Glass {
+        switch self {
+        case .regular: return Glass.regular
+        case .clear:   return Glass.clear.tint(Color.black.opacity(0.22))
+        }
+    }
 }
 
 extension View {
@@ -44,8 +60,8 @@ extension View {
 
     /// A transient surface that holds controls — the Explore Time panel, an action cluster.
     /// Not interactive itself; the things inside it are.
-    func glassPanel(cornerRadius: CGFloat = 28, tone: GlassTone = .regular) -> some View {
-        self.glassEffect(tone == .clear ? .clear : .regular, in: .rect(cornerRadius: cornerRadius))
+    func glassPanel(cornerRadius: CGFloat = Radius.hero, tone: GlassTone = .regular) -> some View {
+        self.glassEffect(tone.material, in: .rect(cornerRadius: cornerRadius))
     }
 }
 
@@ -65,8 +81,11 @@ private struct GlassControlModifier: ViewModifier {
         }
     }
 
+    /// A tinted control names its own colour, so it replaces the tone's tint rather than
+    /// adding to it: a selected chip should read as the system accent, not as the accent seen
+    /// through a dark pane.
     private var glass: Glass {
-        let base: Glass = tone == .clear ? .clear : .regular
+        let base = tone.material
         return tinted ? base.tint(Palette.accent).interactive() : base.interactive()
     }
 }
@@ -91,7 +110,14 @@ struct GlassChip: View {
             }
             .foregroundStyle(isSelected ? Color.white : Palette.textPrimary)
             .padding(.horizontal, Space.l)
-            .padding(.vertical, 10)
+            // A sixteen-point label with ten points above and below came out at forty, four
+            // short of the smallest target Apple will vouch for — and these are among the most
+            // tapped controls in the app. The floor is stated rather than padded up to, so it
+            // still holds if the label ever grows.
+            .frame(minHeight: 44)
+            // Without this only the text and the glyph answer a finger. The padding around
+            // them is most of the capsule, and it was dead.
+            .contentShape(.capsule)
         }
         .buttonStyle(.plain)
         .glassControl(.capsule, tinted: isSelected)
@@ -112,10 +138,17 @@ struct GlassIconButton: View {
             Image(systemName: systemImage)
                 .font(.system(size: 17, weight: .semibold))
                 // Over a photograph the glass is clear, so the symbol carries its own
-                // contrast rather than relying on the material to provide it.
+                // contrast rather than relying on the material to provide it. The shadow is
+                // tight and dark rather than wide and faint: it has to draw an edge around a
+                // white glyph lying on a white photograph, and a soft halo at a quarter black
+                // only greys the picture without ever reaching that.
                 .foregroundStyle(prominent || tone == .clear ? Color.white : Palette.textPrimary)
-                .shadow(color: .black.opacity(tone == .clear ? 0.25 : 0), radius: 3, y: 1)
+                .shadow(color: .black.opacity(tone == .clear ? 0.4 : 0), radius: 2, y: 1)
                 .frame(width: 46, height: 46)
+                // Forty-six points of glass around a seventeen-point glyph, and only the glyph
+                // was answering: `frame` gives a view its size, never its touch area. The
+                // button measured forty-six and behaved like seventeen.
+                .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .glassControl(.circle, tone: tone, tinted: prominent)
