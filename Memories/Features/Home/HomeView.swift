@@ -63,6 +63,7 @@ struct HomeView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                     }
+                    .accessibilityLabel("More")
                 }
                 // Settings deserves one tap from the first screen, not a trip through a menu.
                 ToolbarItem(placement: .topBarLeading) {
@@ -89,11 +90,16 @@ struct HomeView: View {
         // The feed is built the moment the view appears, which on a first run is before
         // there is anything to build it from. Without this it would stay empty until the
         // calendar day changed.
+        //
+        // Both go through `loadIfNeeded` rather than forcing a rebuild. Indexing stops every
+        // time the app is brought forward — the pass starts, finds nothing to do and ends —
+        // and rebuilding for that re-ordered the page under whoever was reading it and counted
+        // every memory on it as shown again, which is what pushes a memory out of tomorrow.
         .onChange(of: app.coordinator.hasUsableIndex) { _, usable in
-            if usable { Task { await model.reload(app: app) } }
+            if usable { Task { await model.loadIfNeeded(app: app) } }
         }
         .onChange(of: app.coordinator.isRunning) { _, running in
-            if !running { Task { await model.reload(app: app) } }
+            if !running { Task { await model.loadIfNeeded(app: app) } }
         }
     }
 
@@ -149,7 +155,10 @@ struct HomeView: View {
                 detail: "Photo access is \(app.library.access.title.lowercased()). Grant access in Settings and your memories will start appearing.",
                 symbol: "lock"
             )
-        } else if app.coordinator.isRunning || !app.coordinator.hasUsableIndex {
+        } else if model.isBuilding || app.coordinator.isRunning || !app.coordinator.hasUsableIndex {
+            // `isBuilding` belongs here as much as the other two. Without it the page announced
+            // "Nothing to remember yet" for the second or so it takes to assemble the feed and
+            // then filled with memories, which is a screen calling itself broken.
             QuietStatusView(
                 title: "Getting your memories ready",
                 detail: "They will appear here as they are found. You can keep using the app while this happens.",

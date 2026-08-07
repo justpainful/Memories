@@ -164,6 +164,33 @@ private struct SelectionOverlayModifier: ViewModifier {
 
 // MARK: - The bar
 
+extension View {
+    /// Pins the batch bar above the app's floating tab bar. Applied to a **scroll view**, never
+    /// to the content inside one.
+    ///
+    /// That distinction is the whole reason this exists. `safeAreaInset` lays its content beside
+    /// the view it modifies, so attached to the grid — which is the scrolled content — the bar
+    /// came out at the *end of the photographs* rather than at the bottom of the screen. On a
+    /// short grid nobody noticed; on fifteen thousand items it meant picking four photos and
+    /// then scrolling to the end of the library to find the buttons. Attached to the scroll view
+    /// the same modifier pins the bar to the viewport and insets the content behind it, which is
+    /// what it was always meant to do here.
+    @MainActor
+    func selectionActionBar(_ selection: PhotoSelection) -> some View {
+        self
+            .safeAreaInset(edge: .bottom) {
+                if selection.isActive {
+                    SelectionActionBar(selection: selection)
+                        // Clears the glass tab bar, which is drawn by the app rather than by
+                        // the system and so insets nothing on its own.
+                        .padding(.bottom, 132)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.smooth(duration: 0.3), value: selection.isActive)
+    }
+}
+
 /// The floating batch-action bar: the same four things the app already does to one photo at
 /// a time, done to the whole selection.
 ///

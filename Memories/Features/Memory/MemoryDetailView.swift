@@ -12,11 +12,10 @@ struct MemoryDetailView: View {
     @Namespace private var opening
     @State private var mode: CurationMode = .smart
     @State private var records: [AssetRecord] = []
+    @State private var people: [PersonRecord] = []
     @State private var viewerStart: String?
     @State private var isSaving = false
     @State private var note: String?
-
-    private let columns = [GridItem(.adaptive(minimum: 108), spacing: 4)]
 
     var body: some View {
         ScrollView {
@@ -39,16 +38,7 @@ struct MemoryDetailView: View {
                                     detail: "Everything here has been hidden from Memories.",
                                     symbol: "eye.slash")
                 } else {
-                    LazyVGrid(columns: columns, spacing: 4) {
-                        ForEach(records, id: \.localIdentifier) { record in
-                            Button { viewerStart = record.localIdentifier } label: {
-                                gridTile(record)
-                            }
-                            .buttonStyle(.plain)
-                            .matchedTransitionSource(id: record.localIdentifier, in: opening)
-                        }
-                    }
-                    .padding(.horizontal, 4)
+                    photographs
                 }
 
                 if mode == .smart, hiddenByCuration > 0 {
@@ -58,10 +48,15 @@ struct MemoryDetailView: View {
                         Label("Show all \(candidate.assetCount)", systemImage: "square.stack.3d.down.right")
                             .font(Typo.control)
                             .foregroundStyle(Palette.accent)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal, Space.gutter)
                 }
+
+                if !people.isEmpty { peopleStrip }
+                if !records.isEmpty { details }
             }
             .padding(.top, Space.s)
             .padding(.bottom, 132)
@@ -85,6 +80,7 @@ struct MemoryDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis")
                 }
+                .accessibilityLabel("More")
             }
         }
         .fullScreenCover(item: Binding(
@@ -131,6 +127,7 @@ struct MemoryDetailView: View {
         .task {
             mode = app.settings.smartCuration ? .smart : .pure
             reload()
+            loadPeople()
         }
     }
 
@@ -148,24 +145,182 @@ struct MemoryDetailView: View {
         .padding(.horizontal, Space.gutter)
     }
 
-    private func gridTile(_ record: AssetRecord) -> some View {
-        PhotoImageView(identifier: record.localIdentifier, targetSide: 240)
-            .aspectRatio(1, contentMode: .fill)
-            .clipShape(.rect(cornerRadius: 6))
+    // MARK: The photographs
+
+    /// A short memory gets larger photographs rather than the same small tiles with a screen
+    /// of white underneath them.
+    ///
+    /// The screen used to draw one fixed grid at roughly three across whatever it held, so a
+    /// memory of three frames came out as a single band of thumbnails below the title and
+    /// eleven hundred points of nothing beneath it — which reads as a screen that failed to
+    /// load, not as a spacious one. Photos answers the same situation by making the pictures
+    /// bigger, and the sizes below are chosen so that any memory fills at least a screenful:
+    /// one frame is a full-width portrait, two are full-width squares, three to six run two
+    /// across, and only once there are enough to fill the page on their own does the ordinary
+    /// grid take over.
+    @ViewBuilder
+    private var photographs: some View {
+        if records.count > 6 {
+            // Enough frames to fill the page by themselves, so the density is the user's —
+            // the same pinch, the same remembered choice, as every other grid in the app.
+            PhotoGrid {
+                ForEach(records, id: \.localIdentifier) { record in
+                    openable(record) { tile(record, aspect: 1, cornerRadius: 6) }
+                }
+            }
+        } else {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s),
+                                     count: featureColumns),
+                      spacing: Space.s) {
+                ForEach(records, id: \.localIdentifier) { record in
+                    openable(record) {
+                        tile(record, aspect: featureAspect, cornerRadius: featureRadius)
+                    }
+                }
+            }
+            .padding(.horizontal, Space.gutter)
+        }
+    }
+
+    /// One or two frames run the full width; three to six pair up. Either way a memory now
+    /// reaches the bottom of the screen with photographs rather than with white.
+    private var featureColumns: Int { records.count > 2 ? 2 : 1 }
+
+    /// A lone photograph is drawn as a portrait card, the shape the feed already opens on.
+    private var featureAspect: CGFloat { records.count == 1 ? 0.8 : 1 }
+
+    private var featureRadius: CGFloat { records.count > 2 ? Radius.tile : Radius.card }
+
+    private func openable<Content: View>(_ record: AssetRecord,
+                                         @ViewBuilder content: () -> Content) -> some View {
+        Button { viewerStart = record.localIdentifier } label: {
+            content()
+        }
+        .buttonStyle(.plain)
+        .matchedTransitionSource(id: record.localIdentifier, in: opening)
+    }
+
+    private func tile(_ record: AssetRecord, aspect: CGFloat, cornerRadius: CGFloat) -> some View {
+        // A larger tile deserves a larger request; asking for a 240-point thumbnail and
+        // stretching it across the screen is how a hero frame comes out soft.
+        PhotoImageView(identifier: record.localIdentifier,
+                       targetSide: aspect < 1 ? 900 : 600)
+            .aspectRatio(aspect, contentMode: .fill)
+            .clipShape(.rect(cornerRadius: cornerRadius))
             .overlay(alignment: .bottomLeading) {
                 if record.isVideo || record.isLivePhoto {
-                    MediaBadge(record: record).padding(5)
+                    MediaBadge(record: record).padding(Space.s)
                 }
             }
             .overlay(alignment: .topTrailing) {
                 if record.isLoved {
                     Image(systemName: "heart.fill")
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(.white)
                         .shadow(radius: 2)
-                        .padding(5)
+                        .padding(Space.s)
                 }
             }
+    }
+
+    // MARK: What else this memory knows
+
+    /// The faces the app already grouped, filtered to the ones actually in this memory.
+    private var peopleStrip: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            Text("People").overlineStyle().padding(.horizontal, Space.gutter)
+
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: Space.l) {
+                    ForEach(people) { person in
+                        NavigationLink {
+                            PersonScreen(person: person)
+                        } label: {
+                            VStack(spacing: Space.s) {
+                                FaceThumbnail(person: person, side: 64)
+                                Text(person.displayName)
+                                    .font(Typo.meta)
+                                    .foregroundStyle(person.isNamed ? Palette.textPrimary
+                                                                    : Palette.textTertiary)
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 76)
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, Space.gutter)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    /// When, where and what — three things the app has already worked out and was throwing
+    /// away. On a long memory they are a footnote; on a short one they are the rest of the page.
+    private var details: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            Text("Details").overlineStyle().padding(.horizontal, Space.gutter)
+
+            VStack(spacing: 0) {
+                detailRow("clock", spanText)
+                if let place = candidate.placeName {
+                    hairline
+                    detailRow("mappin.and.ellipse", place)
+                }
+                hairline
+                detailRow("photo.on.rectangle.angled", makeupText)
+            }
+            // The sunk fill rather than the grouped surface: this card sits on
+            // `systemBackground`, and `secondarySystemGroupedBackground` is white on white
+            // there — a card that only exists in the dark.
+            .background(Palette.surfaceSunk, in: .rect(cornerRadius: Radius.card))
+            .padding(.horizontal, Space.gutter)
+        }
+    }
+
+    private var hairline: some View {
+        Rectangle()
+            .fill(Palette.hairline)
+            .frame(height: 0.5)
+            .padding(.leading, 52)
+    }
+
+    private func detailRow(_ symbol: String, _ text: String) -> some View {
+        HStack(spacing: Space.l) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Palette.accent)
+                .frame(width: 20)
+            Text(text)
+                .font(Typo.label)
+                .foregroundStyle(Palette.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Space.l)
+        .padding(.vertical, Space.m)
+    }
+
+    /// One day, or the two ends of it. The interval style collapses whatever the ends share.
+    private var spanText: String {
+        let dates = records.map(\.momentDate)
+        guard let first = dates.min(), let last = dates.max() else {
+            return candidate.referenceDate.formatted(date: .abbreviated, time: .omitted)
+        }
+        guard !Calendar.current.isDate(first, inSameDayAs: last) else {
+            return first.formatted(date: .long, time: .omitted)
+        }
+        return (first..<last).formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private var makeupText: String {
+        let videos = records.filter { $0.isVideo }.count
+        let photos = records.count - videos
+        var parts: [String] = []
+        if photos > 0 { parts.append("\(photos) \(photos == 1 ? "photo" : "photos")") }
+        if videos > 0 { parts.append("\(videos) \(videos == 1 ? "video" : "videos")") }
+        return parts.joined(separator: " · ")
     }
 
     private var hiddenByCuration: Int {
@@ -190,6 +345,23 @@ struct MemoryDetailView: View {
                                        context: app.container.mainContext)
             .filter { LibraryQuery.passes($0, options: options) }
         records = Curator.curate(all, options: options)
+    }
+
+    /// Whoever the app already grouped and who is actually in this memory, the person who
+    /// turns up most first. Read against the memory's whole set rather than the curated one,
+    /// so switching to Smart does not quietly drop somebody out of the row.
+    private func loadPeople() {
+        let inMemory = Set(candidate.assetIdentifiers)
+        let descriptor = FetchDescriptor<PersonRecord>()
+        let everyone = (try? app.container.mainContext.fetch(descriptor)) ?? []
+
+        var appearances: [(person: PersonRecord, count: Int)] = []
+        for person in everyone where !person.isHidden {
+            let shared = person.assetIdentifiers.filter { inMemory.contains($0) }.count
+            if shared > 0 { appearances.append((person, shared)) }
+        }
+        appearances.sort { $0.count > $1.count }
+        people = appearances.prefix(12).map { $0.person }
     }
 }
 

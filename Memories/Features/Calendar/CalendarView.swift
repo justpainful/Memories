@@ -13,14 +13,21 @@ struct CalendarView: View {
     @State private var openDay: TimeWindow?
 
     private let calendar = Calendar.current
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
+    /// Four points between cells rather than six, and a 16-point margin rather than 20.
+    /// Seven columns inside the old measurements left each day 42 points across on the
+    /// smallest iPhone, which is under what a fingertip can be relied on to hit.
+    private let cellSpacing: CGFloat = 4
+    private let cellHeight: CGFloat = 48
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: cellSpacing), count: 7)
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: Space.l) {
                 monthHeader
 
-                HStack(spacing: 6) {
+                HStack(spacing: cellSpacing) {
                     ForEach(weekdaySymbols, id: \.self) { symbol in
                         Text(symbol)
                             .font(.system(size: 11, weight: .semibold))
@@ -28,17 +35,17 @@ struct CalendarView: View {
                             .frame(maxWidth: .infinity)
                     }
                 }
-                .padding(.horizontal, Space.gutter)
+                .padding(.horizontal, Space.l)
 
-                LazyVGrid(columns: columns, spacing: 6) {
+                LazyVGrid(columns: columns, spacing: cellSpacing) {
                     ForEach(0..<leadingBlanks, id: \.self) { index in
-                        Color.clear.frame(height: 46).id("blank\(index)")
+                        Color.clear.frame(height: cellHeight).id("blank\(index)")
                     }
                     ForEach(daysInMonth, id: \.self) { day in
                         dayCell(day)
                     }
                 }
-                .padding(.horizontal, Space.gutter)
+                .padding(.horizontal, Space.l)
             }
             .padding(.top, Space.s)
             .padding(.bottom, 132)
@@ -57,11 +64,7 @@ struct CalendarView: View {
 
     private var monthHeader: some View {
         HStack {
-            Button { step(-1) } label: {
-                Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Previous month")
+            monthStep(-1, symbol: "chevron.left", label: "Previous month")
 
             Spacer()
             Text(anchor, format: .dateTime.month(.wide).year())
@@ -69,14 +72,26 @@ struct CalendarView: View {
                 .foregroundStyle(Palette.textPrimary)
             Spacer()
 
-            Button { step(1) } label: {
-                Image(systemName: "chevron.right").font(.system(size: 15, weight: .semibold))
-            }
-            .buttonStyle(.plain)
-            .disabled(isCurrentMonth)
-            .accessibilityLabel("Next month")
+            monthStep(1, symbol: "chevron.right", label: "Next month")
+                .disabled(isCurrentMonth)
         }
-        .padding(.horizontal, Space.gutter)
+        .padding(.horizontal, Space.m)
+    }
+
+    /// A chevron is fifteen points across, and a button is hit where it is drawn — which made
+    /// walking through the months a game of hitting a fifteen-point square twice a second.
+    private func monthStep(_ months: Int, symbol: String, label: String) -> some View {
+        Button {
+            step(months)
+            Haptics.selection()
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     private func dayCell(_ day: Int) -> some View {
@@ -88,7 +103,7 @@ struct CalendarView: View {
             ZStack {
                 if let cover = bucket?.coverIdentifier {
                     PhotoImageView(identifier: cover, targetSide: 120)
-                        .frame(height: 46)
+                        .frame(height: cellHeight)
                         .clipShape(.rect(cornerRadius: 8))
                         .overlay {
                             RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.28))
@@ -99,16 +114,21 @@ struct CalendarView: View {
                 } else {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Palette.surfaceSunk.opacity(0.5))
-                        .frame(height: 46)
+                        .frame(height: cellHeight)
                     Text("\(day)")
                         .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(Palette.textTertiary)
                 }
             }
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .disabled(bucket == nil)
-        .accessibilityLabel("\(day), \(bucket?.count ?? 0) photos")
+        // A day with nothing in it is not a control, so it is not announced as one that leads
+        // somewhere. The count only means something where there is a count.
+        .accessibilityLabel(bucket == nil
+                            ? "\(day), no photos"
+                            : "\(day), \(bucket?.count ?? 0) photos")
     }
 
     // MARK: Data

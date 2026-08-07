@@ -30,6 +30,10 @@ struct SectionHeader: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Space.gutter)
+        // The feed wraps this in a button that opens the memory. A button is hit only where
+        // it draws, and a headline draws to the end of its words — so everything to the right
+        // of the title, which on a short one is most of the row, did nothing at all.
+        .contentShape(.rect)
     }
 }
 
@@ -83,7 +87,11 @@ struct HeroMemoryCard: View {
         }
         .aspectRatio(0.8, contentMode: .fit)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(candidate.title). \(candidate.subtitle ?? "")")
+        // Joined rather than interpolated: a memory without a subtitle was being announced
+        // with a full stop and a silence after it.
+        .accessibilityLabel([candidate.title, candidate.subtitle]
+            .compactMap { $0 }
+            .joined(separator: ". "))
     }
 }
 

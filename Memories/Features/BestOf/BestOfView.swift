@@ -96,7 +96,12 @@ struct BestOfView: View {
         .contentMargins(.bottom, 132, for: .scrollContent)
         .navigationTitle("Best Of")
         .navigationBarTitleDisplayMode(.inline)
-        .task { load() }
+        // Finding trips means reading every occasion in the library and its cover frame.
+        // Yielding first keeps that out of the push animation.
+        .task {
+            await Task.yield()
+            load()
+        }
     }
 
     private var tripsFooter: String {
@@ -318,15 +323,23 @@ private struct BestOfResultsScreen: View {
 
     @Environment(\.app) private var app
     @State private var records: [AssetRecord] = []
+    @State private var isLoading = true
 
     var body: some View {
         AssetCollectionScreen(
             title: title,
             records: records,
             emptyTitle: "Nothing to choose from",
-            emptyDetail: "There are no photos here yet."
+            emptyDetail: "There are no photos here yet.",
+            isLoading: isLoading
         )
-        .task { load() }
+        // Ranking a whole year takes long enough to be seen. Yielding first lets the push
+        // land on an empty grid rather than on "nothing to choose from", which is a different
+        // claim and, for the moment it is on screen, an untrue one.
+        .task {
+            await Task.yield()
+            load()
+        }
     }
 
     private func load() {
@@ -349,6 +362,7 @@ private struct BestOfResultsScreen: View {
         records = Array(
             curated.sorted { $0.memoryScore > $1.memoryScore }.prefix(keepCount(of: curated.count))
         )
+        isLoading = false
     }
 
     /// A best-of that shows nearly everything is not a best-of. Keep the strongest third,

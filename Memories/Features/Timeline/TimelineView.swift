@@ -5,7 +5,7 @@ import SwiftUI
 struct TimelineView: View {
     @Environment(\.app) private var app
 
-    @State private var buckets: [MonthBucket] = []
+    @State private var sections: [YearSection] = []
     @State private var isLoading = true
     @State private var scrollTarget: Int?
     @State private var openMonth: MonthBucket?
@@ -20,20 +20,25 @@ struct TimelineView: View {
                         LazyVStack(alignment: .leading, spacing: Space.xl) {
                             if isLoading {
                                 QuietStatusView(title: "Reading your library", symbol: "clock")
-                            } else if buckets.isEmpty {
+                            } else if sections.isEmpty {
                                 QuietStatusView(
                                     title: "Nothing here yet",
                                     detail: "Once there are photos in your library they will appear along this timeline.",
                                     symbol: "calendar"
                                 )
                             } else {
-                                ForEach(groupedByYear, id: \.year) { group in
-                                    yearSection(group)
-                                        .id(group.year)
+                                ForEach(sections) { section in
+                                    yearSection(section)
+                                        .id(section.year)
                                 }
                             }
                         }
                         .padding(.top, Space.s)
+                        // Room for the scrubber. It floats over this list, and a row that runs
+                        // underneath it is a row whose right-hand end — the chevron, the part
+                        // that most looks like the thing to press — silently scrubs the year
+                        // instead of opening the month.
+                        .padding(.trailing, scrubberInset)
                         .padding(.bottom, 132)
                     }
                     .scrollIndicators(.hidden)
@@ -44,8 +49,8 @@ struct TimelineView: View {
                     }
                 }
 
-                if years.count > 1 {
-                    YearScrubber(years: years) { year in
+                if showsScrubber {
+                    YearScrubber(years: sections.map(\.year)) { year in
                         scrollTarget = year
                         Haptics.selection()
                     }
@@ -70,33 +75,38 @@ struct TimelineView: View {
         }
         .task { await load() }
         .onChange(of: app.library.changeGeneration) { _, _ in Task { await load() } }
+        // On a first run this screen is built before the library has been read, so without
+        // these it would say "Nothing here yet" until something in Photos changed.
+        .onChange(of: app.coordinator.hasUsableIndex) { _, usable in
+            if usable { Task { await load() } }
+        }
+        .onChange(of: app.coordinator.isRunning) { _, running in
+            if !running { Task { await load() } }
+        }
     }
 
     // MARK: Sections
 
-    private var years: [Int] {
-        var seen = Set<Int>()
-        return buckets.map(\.year).filter { seen.insert($0).inserted }
-    }
+    private var showsScrubber: Bool { sections.count > 1 }
 
-    private var groupedByYear: [(year: Int, months: [MonthBucket])] {
-        years.map { year in (year, buckets.filter { $0.year == year }) }
-    }
+    /// Only reserved when the scrubber is actually drawn, so a library with a single year
+    /// keeps the full width.
+    private var scrubberInset: CGFloat { showsScrubber ? YearScrubber.width + 4 : 0 }
 
-    private func yearSection(_ group: (year: Int, months: [MonthBucket])) -> some View {
+    private func yearSection(_ section: YearSection) -> some View {
         VStack(alignment: .leading, spacing: Space.l) {
             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                Text(String(group.year))
+                Text(String(section.year))
                     .font(Typo.editorial(30))
                     .foregroundStyle(Palette.textPrimary)
-                Text("\(group.months.reduce(0) { $0 + $1.count })")
+                Text("\(section.count)")
                     .font(Typo.meta)
                     .foregroundStyle(Palette.textTertiary)
                 Spacer()
             }
             .padding(.horizontal, Space.gutter)
 
-            ForEach(group.months) { month in
+            ForEach(section.months) { month in
                 Button { openMonth = month } label: {
                     MonthRow(bucket: month)
                 }
@@ -105,11 +115,44 @@ struct TimelineView: View {
         }
     }
 
+    /// Reads the library and, only if the answer changed, hands it to the list.
+    ///
+    /// Both of those matter. Grouping used to happen inside `body`, which meant walking every
+    /// month of the library again on each redraw; and this runs again whenever indexing stops,
+    /// so replacing an identical array — or flashing the loading state a second time — would
+    /// restart the list under whoever was reading it.
     private func load() async {
-        isLoading = true
         let indexer = LibraryIndexer(modelContainer: app.container)
-        buckets = await indexer.monthBuckets(options: .browsing)
+        let buckets = await indexer.monthBuckets(options: .browsing)
+        let fresh = YearSection.group(buckets)
+        if fresh != sections { sections = fresh }
         isLoading = false
+    }
+}
+
+/// One year of the timeline, grouped once when the library is read rather than on every frame.
+private struct YearSection: Identifiable, Equatable {
+    let year: Int
+    let months: [MonthBucket]
+    let count: Int
+
+    var id: Int { year }
+
+    /// The buckets arrive newest first and already in order, so one walk is enough — the years
+    /// come out in the order they were met and each keeps its months as it found them.
+    static func group(_ buckets: [MonthBucket]) -> [YearSection] {
+        var years: [Int] = []
+        var months: [Int: [MonthBucket]] = [:]
+        for bucket in buckets {
+            if months[bucket.year] == nil { years.append(bucket.year) }
+            months[bucket.year, default: []].append(bucket)
+        }
+        return years.map { year in
+            let group = months[year] ?? []
+            return YearSection(year: year,
+                               months: group,
+                               count: group.reduce(0) { $0 + $1.count })
+        }
     }
 }
 
@@ -141,6 +184,9 @@ private struct MonthRow: View {
                 .foregroundStyle(Palette.textTertiary)
         }
         .padding(.horizontal, Space.gutter)
+        // The stretch between the month's name and its chevron is empty, and a button is hit
+        // only where it is drawn — so the middle of the row, which is most of it, did nothing.
+        .contentShape(.rect)
     }
 }
 
@@ -149,8 +195,18 @@ private struct YearScrubber: View {
     let years: [Int]
     let onSelect: (Int) -> Void
 
-    private let rowHeight: CGFloat = 20
+    /// How much of the trailing edge this occupies, so the list can keep its rows clear of it.
+    static let width: CGFloat = 44
+
+    /// Tall enough to aim at, and the whole column is padded rather than the labels, so the
+    /// glass that can be seen is the glass that can be touched.
+    private static let idealRowHeight: CGFloat = 22
+    /// Beyond this the rows shrink instead of the column running off the top of the screen,
+    /// where the oldest years would be unreachable.
+    private static let maxColumnHeight: CGFloat = 420
+
     private let rowSpacing: CGFloat = 2
+    private let verticalPadding: CGFloat = Space.s
 
     @State private var active: Int?
     /// The year already handed over during the current touch, cleared when the finger lifts —
@@ -163,20 +219,32 @@ private struct YearScrubber: View {
                 Text(String(year).suffix(2))
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(active == year ? Palette.accent : Palette.textTertiary)
-                    .frame(width: 30, height: rowHeight)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: rowHeight)
             }
         }
+        .padding(.vertical, verticalPadding)
+        .frame(width: Self.width)
+        // Applied over the padding, not inside it. The glass panel is drawn around the whole
+        // padded column, and a hit shape that stopped at the labels left a visible band of
+        // material at each end that looked like the control and was not part of it.
         .contentShape(.rect)
         // A zero minimum distance makes a tap arrive as the first drag update, so one gesture
         // covers both without the labels racing the scrubber for the touch.
         .gesture(
             DragGesture(minimumDistance: 0)
-                .onChanged { select(under: $0.location.y) }
+                .onChanged { select(under: $0.location.y - verticalPadding) }
                 .onEnded { _ in emitted = nil }
         )
-        .padding(.vertical, Space.s)
         .glassPanel(cornerRadius: 18)
         .accessibilityLabel("Jump to year")
+    }
+
+    private var rowHeight: CGFloat {
+        guard years.count > 1 else { return Self.idealRowHeight }
+        let gaps = rowSpacing * CGFloat(years.count - 1)
+        let available = (Self.maxColumnHeight - gaps) / CGFloat(years.count)
+        return max(11, min(Self.idealRowHeight, available))
     }
 
     private func select(under y: CGFloat) {
@@ -197,19 +265,27 @@ struct MonthGridView: View {
 
     @Environment(\.app) private var app
     @State private var days: [DaySlice] = []
+    @State private var isLoading = true
     @State private var viewing: String?
-
-    private let columns = [GridItem(.adaptive(minimum: 108), spacing: 4)]
 
     var body: some View {
         ScrollView {
             // One grid per day rather than one grid for the month: a day that is scrolled
             // past stays a few hundred bytes of dates and identifiers instead of tiles.
             LazyVStack(alignment: .leading, spacing: Space.l) {
+                if days.isEmpty, !isLoading {
+                    QuietStatusView(
+                        title: "Nothing left in this month",
+                        detail: "The photographs taken here are no longer in your library.",
+                        symbol: "calendar"
+                    )
+                }
                 ForEach(days) { day in
                     VStack(alignment: .leading, spacing: Space.s) {
                         dayHeader(day)
-                        LazyVGrid(columns: columns, spacing: 4) {
+                        // The same grid as every other screen, so a pinch means the same
+                        // thing here as it does in the library and the density carries over.
+                        PhotoGrid {
                             ForEach(day.records, id: \.localIdentifier) { record in
                                 Button { viewing = record.localIdentifier } label: {
                                     tile(record)
@@ -217,7 +293,6 @@ struct MonthGridView: View {
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(.horizontal, 4)
                     }
                 }
             }
@@ -234,7 +309,12 @@ struct MonthGridView: View {
         )) { request in
             PhotoViewerView(identifiers: monthIdentifiers, startAt: request.identifier)
         }
-        .task { load() }
+        // A busy month is thousands of rows to fetch and split. Yielding first lets the push
+        // animation finish on an empty month rather than stalling half way through it.
+        .task {
+            await Task.yield()
+            load()
+        }
     }
 
     /// Opening one frame hands the viewer the whole month, not the day it was tapped in,
@@ -268,6 +348,7 @@ struct MonthGridView: View {
     }
 
     private func load() {
+        defer { isLoading = false }
         let calendar = Calendar.current
         guard let interval = calendar.interval(year: bucket.year, month: bucket.month) else { return }
         let records: [AssetRecord] = LibraryQuery.assets(in: [interval], options: .browsing,

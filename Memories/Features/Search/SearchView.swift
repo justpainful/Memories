@@ -13,6 +13,8 @@ struct SearchView: View {
     @State private var results: [AssetRecord] = []
     @State private var matchedCollections: [CollectionRecord] = []
     @State private var interpretation: String?
+    @State private var isSearching = false
+    @State private var selection = PhotoSelection()
 
     var body: some View {
         ScrollView {
@@ -44,6 +46,11 @@ struct SearchView: View {
                                             .foregroundStyle(Palette.textTertiary)
                                     }
                                     .padding(.horizontal, Space.gutter)
+                                    // A row of type is fifteen points tall and the gap between
+                                    // its two ends is not part of it at all: without these the
+                                    // only place the row could be hit was the letters.
+                                    .padding(.vertical, Space.m)
+                                    .contentShape(.rect)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -54,7 +61,9 @@ struct SearchView: View {
                         records: results,
                         emptyTitle: "Nothing matched",
                         emptyDetail: "Try a date, a year, a place, or a kind like “videos”.",
-                        emptySymbol: "magnifyingglass"
+                        emptySymbol: "magnifyingglass",
+                        isLoading: isSearching,
+                        selection: selection
                     )
                 }
             }
@@ -62,11 +71,26 @@ struct SearchView: View {
             .padding(.bottom, 132)
         }
         .scrollIndicators(.hidden)
+        .selectionActionBar(selection)
         .background(Palette.canvas)
         .navigationTitle("Search")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Date, month, year, place, or kind")
-        .onChange(of: query) { _, _ in run() }
+        // Every keystroke used to read the whole library on the main thread and sort it. At
+        // fifteen thousand rows that is the keyboard locking up between letters, and typing
+        // "August" paid for it six times. Waiting for a pause in the typing — and cancelling
+        // the wait when another letter lands — turns those six passes into one.
+        .task(id: query) {
+            guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                clear()
+                return
+            }
+            isSearching = true
+            try? await Task.sleep(for: .milliseconds(280))
+            guard !Task.isCancelled else { return }
+            run()
+            isSearching = false
+        }
     }
 
     /// Today's date leads, because a day typed without a year searches every year — one tap is
@@ -77,17 +101,23 @@ struct SearchView: View {
     }
 
     private var suggestions: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            Text("Try").overlineStyle()
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Try").overlineStyle().padding(.bottom, Space.s)
             ForEach(hints, id: \.self) { hint in
                 Button { query = hint } label: {
-                    HStack {
+                    HStack(spacing: Space.m) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 13))
                             .foregroundStyle(Palette.textTertiary)
                         Text(hint).font(Typo.label).foregroundStyle(Palette.textPrimary)
                         Spacer()
                     }
+                    // The row spans the screen but only the glyph and the word were ever
+                    // drawn, and a button is hit where it is drawn — so everything to the
+                    // right of the word was dead. A single line of type is not 44 points
+                    // tall either, which is the other half of why these were hard to press.
+                    .frame(minHeight: 44)
+                    .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
             }
@@ -97,12 +127,20 @@ struct SearchView: View {
 
     // MARK: Query
 
+    private func clear() {
+        results = []
+        matchedCollections = []
+        interpretation = nil
+        isSearching = false
+        // A selection made in one set of results means nothing in the next, and one that
+        // survives the query that produced it is how a batch lands on the wrong photographs.
+        selection.end()
+    }
+
     private func run() {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            results = []
-            matchedCollections = []
-            interpretation = nil
+            clear()
             return
         }
 
@@ -159,6 +197,8 @@ struct SearchView: View {
         }
 
         results = pool.sorted { $0.momentDate > $1.momentDate }
+        // What was picked belonged to the last set of results; these are a different set.
+        selection.clear()
         matchedCollections = collections(matching: lowered, context: context)
         interpretation = described.isEmpty
             ? "Showing everything that matched."

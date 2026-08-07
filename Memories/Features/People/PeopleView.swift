@@ -213,22 +213,29 @@ private struct PersonTile: View {
 }
 
 /// Everything one person appears in.
-private struct PersonScreen: View {
+///
+/// Not private to this file, and neither is the face below: a memory lists the people in it,
+/// and a face that cannot be pressed to see the rest of them is a picture pretending to be a
+/// control.
+struct PersonScreen: View {
     let person: PersonRecord
 
     @Environment(\.app) private var app
     @State private var records: [AssetRecord] = []
+    @State private var isLoading = true
 
     var body: some View {
         AssetCollectionScreen(
             title: person.displayName,
             records: records,
             emptyTitle: "Nothing left here",
-            emptyDetail: "The photographs they appeared in are no longer in your library."
+            emptyDetail: "The photographs they appeared in are no longer in your library.",
+            isLoading: isLoading
         )
         .task {
             records = LibraryQuery.records(for: person.assetIdentifiers,
                                            context: app.container.mainContext)
+            isLoading = false
         }
     }
 }
@@ -239,7 +246,7 @@ private struct PersonScreen: View {
 ///
 /// Showing the whole frame would defeat the screen: at 104 points a face inside a landscape is
 /// a few pixels across, and the point of a grid of people is recognising somebody at a glance.
-private struct FaceThumbnail: View {
+struct FaceThumbnail: View {
     let person: PersonRecord
     var side: CGFloat = 104
 

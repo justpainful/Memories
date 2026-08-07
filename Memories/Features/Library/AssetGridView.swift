@@ -11,8 +11,20 @@ struct AssetGridView: View {
     var emptyTitle: String = "Nothing here"
     var emptyDetail: String?
     var emptySymbol: String = "photo.on.rectangle"
+    /// True while the screen is still fetching. Kept apart from "there is nothing here",
+    /// because a grid that announces an empty library for the half second it takes to read
+    /// fifteen thousand rows, then fills, reads as a bug rather than as loading.
+    var isLoading = false
     /// Extra control shown on each tile, e.g. Restore on the Hidden screen.
     var trailingAction: ((AssetRecord) -> AnyView)?
+    /// The selection this grid picks into, when the screen around it wants to own it.
+    ///
+    /// The batch bar has to be pinned to the screen, and only the view that owns the scroll
+    /// view can pin anything to it — declared in here the bar lands at the end of the scrolled
+    /// content, which on a grid of fifteen thousand photographs means scrolling to the bottom
+    /// of the library to reach the buttons. A screen that passes its own selection draws the
+    /// bar with `.selectionActionBar(_:)`; one that does not keeps the old behaviour.
+    var selection: PhotoSelection?
 
     @Environment(\.app) private var app
     /// Ties a tile to the photograph it opens, so the thumbnail grows into the full screen and
@@ -22,9 +34,12 @@ struct AssetGridView: View {
     @State private var similarFor: String?
     @State private var savingFor: String?
     @State private var shareImage: UIImage?
-    @State private var selection = PhotoSelection()
+    @State private var ownSelection = PhotoSelection()
     @State private var loveFailure: String?
     @State private var prefetcher = GridPrefetcher()
+
+    /// Whichever selection is in force: the host's if it took it on, otherwise this grid's own.
+    private var picking: PhotoSelection { selection ?? ownSelection }
 
     var body: some View {
         // Mapped once per redraw, not once per tile. `onAppear` fires for every cell that
@@ -34,27 +49,42 @@ struct AssetGridView: View {
 
         return Group {
             if records.isEmpty {
-                QuietStatusView(title: emptyTitle, detail: emptyDetail, symbol: emptySymbol)
+                // Nothing at all while the fetch is in flight. Photos shows an empty grid
+                // rather than a spinner, and saying anything here would be saying it wrongly.
+                if isLoading {
+                    Color.clear.frame(height: 1)
+                } else {
+                    QuietStatusView(title: emptyTitle, detail: emptyDetail, symbol: emptySymbol)
+                }
             } else {
                 PhotoGrid {
                     ForEach(Array(records.enumerated()), id: \.element.localIdentifier) { index, record in
                         Button {
                             // While selecting, a tap picks rather than opens — the same tile,
                             // two meanings, which is how Photos does it too.
-                            if selection.isActive {
-                                selection.toggle(record.localIdentifier)
+                            if picking.isActive {
+                                picking.toggle(record.localIdentifier)
                             } else {
                                 viewing = record.localIdentifier
                             }
                         } label: {
                             tile(record)
                                 .selectionOverlay(
-                                    isSelecting: selection.isActive,
-                                    isSelected: selection.contains(record.localIdentifier),
+                                    isSelecting: picking.isActive,
+                                    isSelected: picking.contains(record.localIdentifier),
                                     cornerRadius: 6
                                 )
                         }
                         .buttonStyle(.plain)
+                        // Outside the button rather than inside its label. A control nested in
+                        // a button's label never receives the touch — the button around it
+                        // swallows every tap — so Restore on the Hidden screen looked like a
+                        // button and behaved like part of the photograph.
+                        .overlay(alignment: .topTrailing) {
+                            if let trailingAction, !picking.isActive {
+                                trailingAction(record)
+                            }
+                        }
                         // Tell Photos what is coming before it is asked for. Without this every
                         // tile is a cold request issued at the moment it appears.
                         .onAppear {
@@ -65,7 +95,7 @@ struct AssetGridView: View {
                         // Holding a tile to reach its menu would fight picking it, so the menu
                         // steps aside for as long as selection is running.
                         .contextMenu(menuItems: {
-                            if !selection.isActive { actions(for: record) }
+                            if !picking.isActive { actions(for: record) }
                         }, preview: {
                             preview(record)
                         })
@@ -74,27 +104,29 @@ struct AssetGridView: View {
                 }
             }
         }
+        // Only for a screen that has not taken the bar on itself. Here it is part of the
+        // scrolling content and travels with it; see `selection` above.
         .safeAreaInset(edge: .bottom) {
-            if selection.isActive {
-                SelectionActionBar(selection: selection)
+            if selection == nil, picking.isActive {
+                SelectionActionBar(selection: picking)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.smooth(duration: 0.3), value: selection.isActive)
+        .animation(.smooth(duration: 0.3), value: picking.isActive)
         .toolbar {
             if !records.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(selection.isActive ? "Done" : "Select") {
-                        if selection.isActive { selection.end() } else { selection.begin() }
+                    Button(picking.isActive ? "Done" : "Select") {
+                        if picking.isActive { picking.end() } else { picking.begin() }
                         Haptics.selection()
                     }
                 }
                 // The count replaces the title only while selecting. Setting `navigationTitle`
                 // here instead would mean owning it always, and this view does not know what
                 // the screen around it is called.
-                if selection.isActive {
+                if picking.isActive {
                     ToolbarItem(placement: .principal) {
-                        Text(selection.title)
+                        Text(picking.title)
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(Palette.textPrimary)
                     }
@@ -153,9 +185,9 @@ struct AssetGridView: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                if let trailingAction {
-                    trailingAction(record).padding(4)
-                } else if record.isLoved {
+                // The heart only. Anything tappable lives outside the button that wraps this,
+                // where it can actually be tapped.
+                if trailingAction == nil, record.isLoved {
                     Image(systemName: "heart.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(.white)
@@ -256,13 +288,22 @@ struct AssetCollectionScreen: View {
     let records: [AssetRecord]
     var emptyTitle: String = "Nothing here yet"
     var emptyDetail: String?
+    var isLoading = false
+
+    /// Owned here rather than inside the grid so the batch bar can be pinned to the screen.
+    @State private var selection = PhotoSelection()
 
     var body: some View {
         ScrollView {
-            AssetGridView(records: records, emptyTitle: emptyTitle, emptyDetail: emptyDetail)
+            AssetGridView(records: records,
+                          emptyTitle: emptyTitle,
+                          emptyDetail: emptyDetail,
+                          isLoading: isLoading,
+                          selection: selection)
                 .padding(.bottom, 132)
         }
         .scrollIndicators(.hidden)
+        .selectionActionBar(selection)
         .background(Palette.canvas)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

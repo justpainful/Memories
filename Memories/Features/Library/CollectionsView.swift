@@ -94,6 +94,8 @@ struct CollectionDetailView: View {
 
     @Environment(\.app) private var app
     @State private var records: [AssetRecord] = []
+    @State private var isLoading = true
+    @State private var selection = PhotoSelection()
 
     var body: some View {
         ScrollView {
@@ -115,16 +117,22 @@ struct CollectionDetailView: View {
                     records: records,
                     emptyTitle: "Nothing kept here yet",
                     emptyDetail: "Add a memory from its ••• menu.",
-                    emptySymbol: "folder"
+                    emptySymbol: "folder",
+                    isLoading: isLoading,
+                    selection: selection
                 )
             }
             .padding(.bottom, 132)
         }
         .scrollIndicators(.hidden)
+        .selectionActionBar(selection)
         .background(Palette.canvas)
         .navigationTitle(collection.name)
         .navigationBarTitleDisplayMode(.inline)
-        .task { load() }
+        .task {
+            await Task.yield()
+            load()
+        }
     }
 
     private var nonAssetItems: [CollectionItem] {
@@ -143,6 +151,7 @@ struct CollectionDetailView: View {
     private func load() {
         records = LibraryQuery.records(for: collection.assetReferences,
                                        context: app.container.mainContext)
+        isLoading = false
     }
 }
 

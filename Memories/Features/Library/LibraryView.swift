@@ -164,14 +164,22 @@ struct MediaKindScreen: View {
 
     @Environment(\.app) private var app
     @State private var records: [AssetRecord] = []
+    @State private var isLoading = true
 
     var body: some View {
         AssetCollectionScreen(
             title: filter.title,
             records: records,
-            emptyTitle: "No \(filter.title.lowercased()) yet"
+            emptyTitle: "No \(filter.title.lowercased()) yet",
+            isLoading: isLoading
         )
-        .task { load() }
+        // Reading the whole library is the better part of a second at this size, and the
+        // screen is already on the way in. Yielding first lets the empty frame paint as an
+        // empty grid rather than as "no photos" — and lets the push animation finish.
+        .task {
+            await Task.yield()
+            load()
+        }
     }
 
     private func load() {
@@ -179,6 +187,7 @@ struct MediaKindScreen: View {
         options.media = filter
         records = LibraryQuery.allRecords(context: app.container.mainContext)
             .filter { LibraryQuery.passes($0, options: options) }
+        isLoading = false
     }
 }
 
@@ -186,6 +195,8 @@ struct MediaKindScreen: View {
 struct HiddenMemoriesView: View {
     @Environment(\.app) private var app
     @State private var records: [AssetRecord] = []
+    @State private var isLoading = true
+    @State private var selection = PhotoSelection()
 
     var body: some View {
         ScrollView {
@@ -201,6 +212,7 @@ struct HiddenMemoriesView: View {
                     emptyTitle: "Nothing is hidden",
                     emptyDetail: "Photos you hide from Memories will collect here.",
                     emptySymbol: "eye.slash",
+                    isLoading: isLoading,
                     trailingAction: { record in
                         AnyView(
                             Button {
@@ -211,25 +223,36 @@ struct HiddenMemoriesView: View {
                                 Image(systemName: "arrow.uturn.backward.circle.fill")
                                     .font(.system(size: 19))
                                     .foregroundStyle(.white, Palette.accent)
+                                    // The glyph is 19 points across. The touch has to be 44,
+                                    // whatever is drawn inside it.
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(.circle)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Restore to Memories")
                         )
-                    }
+                    },
+                    selection: selection
                 )
             }
             .padding(.bottom, 132)
         }
         .scrollIndicators(.hidden)
+        .selectionActionBar(selection)
         .background(Palette.canvas)
         .navigationTitle("Hidden Memories")
         .navigationBarTitleDisplayMode(.inline)
-        .task { load() }
+        .task {
+            await Task.yield()
+            load()
+        }
     }
 
     private func load() {
-        var options = CurationOptions.browsing
-        options.includeHiddenFromMemories = true
+        // `passes` is not consulted at all here: the one thing every row on this screen has in
+        // common is the flag that keeps it out of everywhere else.
         records = LibraryQuery.allRecords(context: app.container.mainContext)
             .filter { $0.excludedFromMemories }
+        isLoading = false
     }
 }
