@@ -92,6 +92,18 @@ final class PhotoImageLoader {
         return await image(for: asset, targetSize: targetSize, purpose: purpose)
     }
 
+    /// The cached frame, if there is one, without suspending.
+    ///
+    /// A view that is about to await can ask this first and skip clearing what it is already
+    /// showing. Scrolling a tile off screen and back is not a new photograph arriving, and
+    /// blanking to the placeholder for a frame or two in between is the flicker that makes a
+    /// long grid feel unfinished.
+    func cachedImage(forIdentifier identifier: String,
+                     targetSize: CGSize,
+                     purpose: ImagePurpose = .browsing) -> UIImage? {
+        cache.object(forKey: Self.cacheKey(identifier, targetSize, purpose))
+    }
+
     /// Small square thumbnail used by grids, strips and the calendar.
     func thumbnail(forIdentifier identifier: String, side: CGFloat = 200) async -> UIImage? {
         await image(forIdentifier: identifier,

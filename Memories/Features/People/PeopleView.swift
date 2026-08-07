@@ -64,7 +64,11 @@ struct PeopleView: View {
             Button("Cancel", role: .cancel) { cancelRename() }
         }
         .task { load() }
-        .onChange(of: app.coordinator.progress) { _, _ in load() }
+        // Keyed to the stage, not to progress. Progress ticks continuously through a pass and
+        // each tick was re-running two fetches while this screen sat open — hundreds of them,
+        // to redraw a list that only actually changes when the people stage finishes.
+        .onChange(of: app.coordinator.stage) { _, _ in load() }
+        .onChange(of: app.coordinator.isRunning) { _, _ in load() }
     }
 
     // MARK: Ordering

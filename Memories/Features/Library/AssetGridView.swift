@@ -24,14 +24,20 @@ struct AssetGridView: View {
     @State private var shareImage: UIImage?
     @State private var selection = PhotoSelection()
     @State private var loveFailure: String?
+    @State private var prefetcher = GridPrefetcher()
 
     var body: some View {
-        Group {
+        // Mapped once per redraw, not once per tile. `onAppear` fires for every cell that
+        // scrolls in, and rebuilding this inside each of those would cost more than the
+        // prefetching it feeds ever saves.
+        let identifiers = records.map(\.localIdentifier)
+
+        return Group {
             if records.isEmpty {
                 QuietStatusView(title: emptyTitle, detail: emptyDetail, symbol: emptySymbol)
             } else {
                 PhotoGrid {
-                    ForEach(records, id: \.localIdentifier) { record in
+                    ForEach(Array(records.enumerated()), id: \.element.localIdentifier) { index, record in
                         Button {
                             // While selecting, a tap picks rather than opens — the same tile,
                             // two meanings, which is how Photos does it too.
@@ -49,6 +55,13 @@ struct AssetGridView: View {
                                 )
                         }
                         .buttonStyle(.plain)
+                        // Tell Photos what is coming before it is asked for. Without this every
+                        // tile is a cold request issued at the moment it appears.
+                        .onAppear {
+                            prefetcher.tileAppeared(at: index,
+                                                    identifiers: identifiers,
+                                                    side: 240)
+                        }
                         // Holding a tile to reach its menu would fight picking it, so the menu
                         // steps aside for as long as selection is running.
                         .contextMenu(menuItems: {
@@ -126,6 +139,8 @@ struct AssetGridView: View {
         } message: {
             Text(loveFailure ?? "")
         }
+        // Photos should not be left decoding ahead for a grid that is no longer on screen.
+        .onDisappear { prefetcher.stop() }
     }
 
     private func tile(_ record: AssetRecord) -> some View {

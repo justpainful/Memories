@@ -40,12 +40,28 @@ struct PhotoImageView: View {
     }
 
     private func load(side: CGFloat) async {
+        let requested = max(side, targetSide) * UIScreen.main.scale
+        let size = CGSize(width: requested, height: requested)
+
+        // Ask the cache before clearing anything. This runs again every time a tile scrolls
+        // back into view, and blanking to the placeholder first meant a long grid flickered
+        // grey on the way back up even though every frame was already in memory.
+        if let cached = PhotoImageLoader.shared.cachedImage(forIdentifier: identifier,
+                                                            targetSize: size,
+                                                            purpose: purpose) {
+            image = cached
+            isUnavailable = false
+            return
+        }
+
+        // Only now, with a real wait ahead and a different photograph coming, is it right to
+        // let go of the old one — keeping it would show the wrong picture under the new tile.
         image = nil
         isUnavailable = false
-        let requested = max(side, targetSide) * UIScreen.main.scale
+
         let loaded = await PhotoImageLoader.shared.image(
             forIdentifier: identifier,
-            targetSize: CGSize(width: requested, height: requested),
+            targetSize: size,
             purpose: purpose
         )
         if let loaded {
