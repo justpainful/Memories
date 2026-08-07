@@ -62,7 +62,7 @@ final class HomeModel {
 
         for candidate in candidates where candidate.presentation == .throughTheYears {
             let records = LibraryQuery.records(for: candidate.assetIdentifiers, context: context)
-            let grouped = Dictionary(grouping: records) { calendar.component(.year, from: $0.creationDate) }
+            let grouped = Dictionary(grouping: records) { calendar.component(.year, from: $0.momentDate) }
 
             result[candidate.id] = grouped
                 .map { year, assets in

@@ -120,7 +120,7 @@ struct SearchView: View {
 
         let date = DateTerms(text: lowered, calendar: calendar)
 
-        // A named day is narrow enough to fetch by date span, which lets the creationDate index
+        // A named day is narrow enough to fetch by date span, which lets the momentDate index
         // do the work. A bare month or year would touch most of the library either way, so those
         // stay filters over everything.
         var pool: [AssetRecord]
@@ -143,10 +143,10 @@ struct SearchView: View {
         // the whole library here, because either can span all of it.
         if !date.namesADay {
             if let year = date.year {
-                pool = pool.filter { calendar.component(.year, from: $0.creationDate) == year }
+                pool = pool.filter { calendar.component(.year, from: $0.momentDate) == year }
             }
             if let month = date.month {
-                pool = pool.filter { calendar.component(.month, from: $0.creationDate) == month }
+                pool = pool.filter { calendar.component(.month, from: $0.momentDate) == month }
             }
         }
         if let phrase = date.phrase(calendar: calendar) { described.append(phrase) }
@@ -158,7 +158,7 @@ struct SearchView: View {
             described.append("that place")
         }
 
-        results = pool.sorted { $0.creationDate > $1.creationDate }
+        results = pool.sorted { $0.momentDate > $1.momentDate }
         matchedCollections = collections(matching: lowered, context: context)
         interpretation = described.isEmpty
             ? "Showing everything that matched."
@@ -172,7 +172,7 @@ struct SearchView: View {
     private func libraryReach(context: ModelContext, calendar: Calendar) -> Int {
         guard let oldest = LibraryQuery.allRecords(context: context, newestFirst: false, limit: 1).first
         else { return 0 }
-        let earliest = calendar.component(.year, from: oldest.creationDate)
+        let earliest = calendar.component(.year, from: oldest.momentDate)
         return max(0, calendar.component(.year, from: .now) - earliest)
     }
 

@@ -14,7 +14,7 @@ import SwiftData
 @Model
 final class AssetRecord {
     #Unique<AssetRecord>([\.localIdentifier])
-    #Index<AssetRecord>([\.creationDate], [\.localIdentifier])
+    #Index<AssetRecord>([\.momentDate], [\.creationDate], [\.localIdentifier])
 
     // MARK: Identity and Stage 1 metadata
 
@@ -48,6 +48,16 @@ final class AssetRecord {
     /// app that is the day you saved it, so a clip from a holiday three years ago would
     /// otherwise surface as if it happened last week.
     var capturedDate: Date?
+
+    /// The date this actually happened: `capturedDate` when one was recovered, otherwise the
+    /// library's own. **Everything that arranges the library by time reads this**, not
+    /// `creationDate`.
+    ///
+    /// Stored rather than computed on purpose. A computed property cannot appear in a
+    /// SwiftData predicate or sort descriptor, so a corrected date would have changed only
+    /// the label on the viewer while On This Day, Timeline and Calendar carried on filing the
+    /// clip under the day it was saved — a correction that corrected nothing.
+    var momentDate: Date = Date.distantPast
 
     // MARK: Computed by the analysis pipeline
 
@@ -90,6 +100,7 @@ final class AssetRecord {
     init(localIdentifier: String, creationDate: Date) {
         self.localIdentifier = localIdentifier
         self.creationDate = creationDate
+        self.momentDate = creationDate
     }
 }
 
@@ -127,9 +138,10 @@ extension AssetRecord {
 
     var source: SourcePlatform? { sourceRaw.flatMap(SourcePlatform.init(rawValue:)) }
 
-    /// The date this actually happened, preferring a recovered capture date over the day the
-    /// file arrived. Everything that arranges the library by time should read this.
-    var momentDate: Date { capturedDate ?? creationDate }
+    /// Bring `momentDate` back in line after either date it derives from has changed.
+    func refreshMomentDate() {
+        momentDate = capturedDate ?? creationDate
+    }
 
     /// True when the two disagree by more than a day — worth telling the user about, because
     /// it explains why something old is being shown as if it were recent.

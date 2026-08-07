@@ -77,6 +77,11 @@ actor LibraryIndexer {
                     record.isFavoriteInPhotos = snapshot.isFavorite
                     counts.updated += 1
                 }
+
+                // Rows written before `momentDate` existed still carry its default. Filling
+                // it in here costs one comparison per asset on a pass that is already
+                // touching every row, and avoids a migration that would have to.
+                if record.momentDate == .distantPast { record.refreshMomentDate() }
             } else {
                 let record = AssetRecord(localIdentifier: snapshot.localIdentifier,
                                          creationDate: snapshot.creationDate)
@@ -96,6 +101,7 @@ actor LibraryIndexer {
 
     private func apply(_ snapshot: AssetSnapshot, to record: AssetRecord) {
         record.creationDate = snapshot.creationDate
+        record.refreshMomentDate()
         record.modificationDate = snapshot.modificationDate
         record.mediaTypeRaw = snapshot.mediaTypeRaw
         record.mediaSubtypesRaw = snapshot.mediaSubtypesRaw
@@ -143,7 +149,7 @@ actor LibraryIndexer {
         let found = records(matching: identifiers)
         guard !found.isEmpty else { return (0, []) }
 
-        let dates = found.values.map(\.creationDate)
+        let dates = found.values.map(\.momentDate)
         for record in found.values { modelContext.delete(record) }
         notePending(LibraryChangeCounts(removed: found.count))
         modelContext.saveIfNeeded()
@@ -162,7 +168,7 @@ actor LibraryIndexer {
         let version = currentAnalysisVersion
         var descriptor = FetchDescriptor<AssetRecord>(
             predicate: #Predicate { $0.analysisVersion < version && $0.isLocallyAvailable },
-            sortBy: [SortDescriptor(\.creationDate, order: .reverse)]
+            sortBy: [SortDescriptor(\.momentDate, order: .reverse)]
         )
         descriptor.fetchLimit = limit
         guard let records = try? modelContext.fetch(descriptor) else { return [] }
@@ -174,7 +180,7 @@ actor LibraryIndexer {
     func pendingPixelWork(among identifiers: [String]) -> [PendingAsset] {
         records(matching: identifiers).values
             .filter { $0.analysisVersion < currentAnalysisVersion && $0.isLocallyAvailable }
-            .sorted { $0.creationDate > $1.creationDate }
+            .sorted { $0.momentDate > $1.momentDate }
             .map(pendingAsset)
     }
 
@@ -232,6 +238,10 @@ actor LibraryIndexer {
         record.sourceRaw = provenance.platform.rawValue
         if let captured = provenance.capturedDate, captured < record.creationDate {
             record.capturedDate = captured
+            // The whole point of recovering the date: everything that files this asset by
+            // time reads `momentDate`, so the correction has to reach it or it corrects only
+            // the label on the viewer.
+            record.refreshMomentDate()
         }
     }
 
@@ -292,10 +302,10 @@ actor LibraryIndexer {
 
     func clusterInputs(since date: Date? = nil) -> [ClusterInput] {
         var descriptor = FetchDescriptor<AssetRecord>(
-            sortBy: [SortDescriptor(\.creationDate, order: .forward)]
+            sortBy: [SortDescriptor(\.momentDate, order: .forward)]
         )
         if let date {
-            descriptor.predicate = #Predicate { $0.creationDate >= date }
+            descriptor.predicate = #Predicate { $0.momentDate >= date }
         }
         guard let records = try? modelContext.fetch(descriptor) else { return [] }
         return records.map(clusterInput)
@@ -304,7 +314,7 @@ actor LibraryIndexer {
     private func clusterInput(_ record: AssetRecord) -> ClusterInput {
         ClusterInput(
             identifier: record.localIdentifier,
-            date: record.creationDate,
+            date: record.momentDate,
             latitude: record.latitude,
             longitude: record.longitude,
             burstIdentifier: record.burstIdentifier,
@@ -428,8 +438,8 @@ actor LibraryIndexer {
         for _ in 0..<Self.expansionBudget {
             let cutoff = edge
             var descriptor = FetchDescriptor<AssetRecord>(
-                predicate: #Predicate { $0.creationDate < cutoff },
-                sortBy: [SortDescriptor(\.creationDate, order: .reverse)]
+                predicate: #Predicate { $0.momentDate < cutoff },
+                sortBy: [SortDescriptor(\.momentDate, order: .reverse)]
             )
             descriptor.fetchLimit = Self.expansionChunk
 
@@ -437,10 +447,10 @@ actor LibraryIndexer {
                 return edge   // nothing earlier exists; the library itself is the fence
             }
             for neighbour in neighbours {
-                if edge.timeIntervalSince(neighbour.creationDate) > Self.clusterBarrier {
+                if edge.timeIntervalSince(neighbour.momentDate) > Self.clusterBarrier {
                     return edge
                 }
-                edge = neighbour.creationDate
+                edge = neighbour.momentDate
             }
         }
         return nil
@@ -451,8 +461,8 @@ actor LibraryIndexer {
         for _ in 0..<Self.expansionBudget {
             let cutoff = edge
             var descriptor = FetchDescriptor<AssetRecord>(
-                predicate: #Predicate { $0.creationDate > cutoff },
-                sortBy: [SortDescriptor(\.creationDate, order: .forward)]
+                predicate: #Predicate { $0.momentDate > cutoff },
+                sortBy: [SortDescriptor(\.momentDate, order: .forward)]
             )
             descriptor.fetchLimit = Self.expansionChunk
 
@@ -460,10 +470,10 @@ actor LibraryIndexer {
                 return edge
             }
             for neighbour in neighbours {
-                if neighbour.creationDate.timeIntervalSince(edge) > Self.clusterBarrier {
+                if neighbour.momentDate.timeIntervalSince(edge) > Self.clusterBarrier {
                     return edge
                 }
-                edge = neighbour.creationDate
+                edge = neighbour.momentDate
             }
         }
         return nil
@@ -472,7 +482,7 @@ actor LibraryIndexer {
     /// Every row, oldest first. Only the whole-library passes have any business asking.
     private func allRecords() -> [AssetRecord] {
         let descriptor = FetchDescriptor<AssetRecord>(
-            sortBy: [SortDescriptor(\.creationDate, order: .forward)]
+            sortBy: [SortDescriptor(\.momentDate, order: .forward)]
         )
         return (try? modelContext.fetch(descriptor)) ?? []
     }
@@ -480,8 +490,8 @@ actor LibraryIndexer {
     private func records(in range: ClosedRange<Date>) -> [AssetRecord] {
         let start = range.lowerBound, end = range.upperBound
         let descriptor = FetchDescriptor<AssetRecord>(
-            predicate: #Predicate { $0.creationDate >= start && $0.creationDate <= end },
-            sortBy: [SortDescriptor(\.creationDate, order: .forward)]
+            predicate: #Predicate { $0.momentDate >= start && $0.momentDate <= end },
+            sortBy: [SortDescriptor(\.momentDate, order: .forward)]
         )
         return (try? modelContext.fetch(descriptor)) ?? []
     }

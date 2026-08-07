@@ -287,7 +287,7 @@ private struct DaySlice: Identifiable {
     static func split(_ records: [AssetRecord], calendar: Calendar) -> [DaySlice] {
         var slices: [DaySlice] = []
         for record in records {
-            let day = calendar.startOfDay(for: record.creationDate)
+            let day = calendar.startOfDay(for: record.momentDate)
             if slices.last?.date == day {
                 slices[slices.count - 1].records.append(record)
             } else {

@@ -293,7 +293,7 @@ actor MemoryEngine {
     private func forgotten(_ reference: Date, _ options: CurationOptions) -> [MemoryCandidate] {
         guard let cutoff = Calendar.current.date(byAdding: .year, value: -2, to: reference) else { return [] }
         var descriptor = FetchDescriptor<AssetRecord>(
-            predicate: #Predicate { $0.creationDate < cutoff && $0.memoryScore > 0.62 },
+            predicate: #Predicate { $0.momentDate < cutoff && $0.memoryScore > 0.62 },
             sortBy: [SortDescriptor(\.memoryScore, order: .reverse)]
         )
         descriptor.fetchLimit = 220
@@ -317,7 +317,7 @@ actor MemoryEngine {
             kind: .forgotten,
             title: "You haven't seen these in a while",
             subtitle: "\(assets.count) moments",
-            referenceDate: assets.first?.creationDate ?? reference,
+            referenceDate: assets.first?.momentDate ?? reference,
             assetIdentifiers: assets.map(\.localIdentifier),
             coverIdentifier: Curator.cover(for: assets)?.localIdentifier,
             components: components
@@ -341,7 +341,7 @@ actor MemoryEngine {
         // Not the frames themselves — their neighbours in time, which you have not seen.
         var neighbours: [AssetRecord] = []
         for anchor in recent.prefix(6) {
-            let day = Calendar.current.dayInterval(for: anchor.creationDate)
+            let day = Calendar.current.dayInterval(for: anchor.momentDate)
             let sameDay = LibraryQuery.assets(in: [day], options: options, context: modelContext)
             neighbours += sameDay.filter { $0.shownCount == 0 && $0.memoryScore > 0.5 }
         }
@@ -362,7 +362,7 @@ actor MemoryEngine {
             kind: .rediscovery,
             title: "More from what you revisited",
             subtitle: "\(assets.count) moments",
-            referenceDate: assets.first?.creationDate ?? reference,
+            referenceDate: assets.first?.momentDate ?? reference,
             assetIdentifiers: assets.map(\.localIdentifier),
             coverIdentifier: Curator.cover(for: Array(assets))?.localIdentifier,
             components: components
@@ -390,7 +390,7 @@ actor MemoryEngine {
         let eligible = pool.filter {
             LibraryQuery.passes($0, options: options)
                 && $0.isBestInSimilarityCluster
-                && $0.creationDate < settled
+                && $0.momentDate < settled
         }
         let assets = Array(eligible.prefix(10))
         guard assets.count >= 5 else { return [] }
@@ -407,7 +407,7 @@ actor MemoryEngine {
             kind: .rarelySeen,
             title: "Good photos you rarely see",
             subtitle: "\(assets.count) moments",
-            referenceDate: assets.first?.creationDate ?? reference,
+            referenceDate: assets.first?.momentDate ?? reference,
             assetIdentifiers: assets.map(\.localIdentifier),
             coverIdentifier: Curator.cover(for: assets)?.localIdentifier,
             components: components
@@ -453,7 +453,7 @@ actor MemoryEngine {
     private func smartRandom(_ reference: Date, _ options: CurationOptions) -> [MemoryCandidate] {
         var descriptor = FetchDescriptor<AssetRecord>(
             predicate: #Predicate { $0.memoryScore > 0.55 },
-            sortBy: [SortDescriptor(\.creationDate, order: .reverse)]
+            sortBy: [SortDescriptor(\.momentDate, order: .reverse)]
         )
         descriptor.fetchLimit = 900
         guard let pool = try? modelContext.fetch(descriptor) else { return [] }
@@ -481,7 +481,7 @@ actor MemoryEngine {
             kind: .random,
             title: "From somewhere in your library",
             subtitle: "\(assets.count) moments",
-            referenceDate: assets.first?.creationDate ?? reference,
+            referenceDate: assets.first?.momentDate ?? reference,
             assetIdentifiers: assets.map(\.localIdentifier),
             coverIdentifier: Curator.cover(for: assets)?.localIdentifier,
             components: components
@@ -544,7 +544,7 @@ actor MemoryEngine {
     private func eventTitle(for event: EventCluster, assets: [AssetRecord]) -> String {
         if let place = event.placeName { return place }
         let inputs = assets.map {
-            ClusterInput(identifier: $0.localIdentifier, date: $0.creationDate,
+            ClusterInput(identifier: $0.localIdentifier, date: $0.momentDate,
                          latitude: $0.latitude, longitude: $0.longitude,
                          burstIdentifier: $0.burstIdentifier, isVideo: $0.isVideo,
                          featureVector: nil, memoryScore: $0.memoryScore)

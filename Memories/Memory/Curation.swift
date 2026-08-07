@@ -68,8 +68,8 @@ enum LibraryQuery {
             let start = interval.start
             let end = interval.end
             var descriptor = FetchDescriptor<AssetRecord>(
-                predicate: #Predicate { $0.creationDate >= start && $0.creationDate < end },
-                sortBy: [SortDescriptor(\.creationDate, order: .forward)]
+                predicate: #Predicate { $0.momentDate >= start && $0.momentDate < end },
+                sortBy: [SortDescriptor(\.momentDate, order: .forward)]
             )
             if let limitPerInterval { descriptor.fetchLimit = limitPerInterval * 4 }
 
@@ -80,7 +80,7 @@ enum LibraryQuery {
             }
             results.append(contentsOf: filtered)
         }
-        return results.sorted { $0.creationDate < $1.creationDate }
+        return results.sorted { $0.momentDate < $1.momentDate }
     }
 
     static func passes(_ record: AssetRecord, options: CurationOptions) -> Bool {
@@ -110,7 +110,7 @@ enum LibraryQuery {
         let wanted = identifiers
         let descriptor = FetchDescriptor<AssetRecord>(
             predicate: #Predicate { wanted.contains($0.localIdentifier) },
-            sortBy: [SortDescriptor(\.creationDate, order: .forward)]
+            sortBy: [SortDescriptor(\.momentDate, order: .forward)]
         )
         return (try? context.fetch(descriptor)) ?? []
     }
@@ -119,7 +119,7 @@ enum LibraryQuery {
                            newestFirst: Bool = true,
                            limit: Int? = nil) -> [AssetRecord] {
         var descriptor = FetchDescriptor<AssetRecord>(
-            sortBy: [SortDescriptor(\.creationDate, order: newestFirst ? .reverse : .forward)]
+            sortBy: [SortDescriptor(\.momentDate, order: newestFirst ? .reverse : .forward)]
         )
         if let limit { descriptor.fetchLimit = limit }
         return (try? context.fetch(descriptor)) ?? []
@@ -166,7 +166,7 @@ enum Curator {
         //    stills cannot, and quality scoring alone tends to bury them.
         kept = reinstateVideo(from: assets, into: kept)
 
-        return kept.sorted { $0.creationDate < $1.creationDate }
+        return kept.sorted { $0.momentDate < $1.momentDate }
     }
 
     private static func limitClusterDominance(_ assets: [AssetRecord]) -> [AssetRecord] {

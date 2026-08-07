@@ -40,7 +40,7 @@ extension LibraryIndexer {
     /// instant screen and a stall.
     func monthBuckets(options: CurationOptions) -> [MonthBucket] {
         let descriptor = FetchDescriptor<AssetRecord>(
-            sortBy: [SortDescriptor(\.creationDate, order: .reverse)]
+            sortBy: [SortDescriptor(\.momentDate, order: .reverse)]
         )
         guard let records = try? modelContext.fetch(descriptor) else { return [] }
 
@@ -50,7 +50,7 @@ extension LibraryIndexer {
         var order: [Int] = []
 
         for record in records where LibraryQuery.passes(record, options: options) {
-            let components = calendar.dateComponents([.year, .month], from: record.creationDate)
+            let components = calendar.dateComponents([.year, .month], from: record.momentDate)
             guard let year = components.year, let month = components.month else { continue }
             let key = year * 100 + month
 
@@ -78,8 +78,8 @@ extension LibraryIndexer {
         let end = interval.end
 
         let descriptor = FetchDescriptor<AssetRecord>(
-            predicate: #Predicate { $0.creationDate >= start && $0.creationDate < end },
-            sortBy: [SortDescriptor(\.creationDate, order: .forward)]
+            predicate: #Predicate { $0.momentDate >= start && $0.momentDate < end },
+            sortBy: [SortDescriptor(\.momentDate, order: .forward)]
         )
         guard let records = try? modelContext.fetch(descriptor) else { return [] }
 
@@ -87,7 +87,7 @@ extension LibraryIndexer {
         var best: [Int: (String, Double)] = [:]
 
         for record in records where LibraryQuery.passes(record, options: options) {
-            let day = calendar.component(.day, from: record.creationDate)
+            let day = calendar.component(.day, from: record.momentDate)
             counts[day, default: 0] += 1
             if record.memoryScore > (best[day]?.1 ?? -1) {
                 best[day] = (record.localIdentifier, record.memoryScore)

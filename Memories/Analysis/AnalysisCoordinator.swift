@@ -404,7 +404,7 @@ final class AnalysisCoordinator {
             handled.updated += await analyze(pending, allowance: allowance, through: indexer)
         }
 
-        let dates = changed.map(\.creationDate) + removal.dates
+        let dates = changed.map(\.momentDate) + removal.dates
         await indexer.rebuildClusters(around: dates, accountingFor: handled)
     }
 }
