@@ -1,0 +1,13 @@
+# Authoring happens on Windows but everything here is consumed by macOS/Linux tooling
+# (xcodebuild, shell steps inside workflows). Keep LF in the repository regardless of
+# the checkout platform.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ips binary
+
+# Xcode's own formats
+*.pbxproj text eol=lf merge=union
+*.xcscheme text eol=lf
+*.xcworkspacedata text eol=lf

@@ -37,22 +37,7 @@ jobs:
         id: sim
         run: |
           set -euo pipefail
-          # newest available iPhone on the newest available iOS runtime
-          udid=$(xcrun simctl list devices available --json \
-            | python3 -c '
-import json,sys,re
-d=json.load(sys.stdin)["devices"]
-best=None
-def key(rt):
-    m=re.findall(r"(\d+)", rt)
-    return tuple(int(x) for x in m) if m else (0,)
-for rt in sorted(d, key=key, reverse=True):
-    if "iOS" not in rt: continue
-    phones=[x for x in d[rt] if x.get("isAvailable") and "iPhone" in x["name"]]
-    if phones:
-        phones.sort(key=lambda p: p["name"])
-        best=phones[-1]; print(best["udid"]); print(best["name"], rt, file=sys.stderr); break
-')
+          udid=$(xcrun simctl list devices available --json | python3 Scripts/pick_simulator.py)
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
           echo "Using simulator $udid"
 
