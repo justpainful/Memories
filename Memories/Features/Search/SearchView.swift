@@ -65,14 +65,21 @@ struct SearchView: View {
         .background(Palette.canvas)
         .navigationTitle("Search")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: "Year, month, place, or kind")
+        .searchable(text: $query, prompt: "Date, month, year, place, or kind")
         .onChange(of: query) { _, _ in run() }
+    }
+
+    /// Today's date leads, because a day typed without a year searches every year — one tap is
+    /// the shortest route to this date through the whole library.
+    private var hints: [String] {
+        [Date.now.formatted(.dateTime.month(.wide).day()),
+         "2024", "August", "Videos", "Live Photos", "Screenshots", "Favourites"]
     }
 
     private var suggestions: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             Text("Try").overlineStyle()
-            ForEach(["2024", "August", "Videos", "Live Photos", "Screenshots", "Favourites"], id: \.self) { hint in
+            ForEach(hints, id: \.self) { hint in
                 Button { query = hint } label: {
                     HStack {
                         Image(systemName: "magnifyingglass")
@@ -101,6 +108,7 @@ struct SearchView: View {
 
         let context = app.container.mainContext
         let lowered = trimmed.lowercased()
+        let calendar = Calendar.current
         var options = CurationOptions.browsing
         var described: [String] = []
 
@@ -110,8 +118,20 @@ struct SearchView: View {
         else if lowered.contains("screenshot") { options.media = .screenshots; described.append("screenshots") }
         else if lowered.contains("photo") { options.media = .photos; described.append("photos") }
 
-        var pool = LibraryQuery.allRecords(context: context)
-            .filter { LibraryQuery.passes($0, options: options) }
+        let date = DateTerms(text: lowered, calendar: calendar)
+
+        // A named day is narrow enough to fetch by date span, which lets the creationDate index
+        // do the work. A bare month or year would touch most of the library either way, so those
+        // stay filters over everything.
+        var pool: [AssetRecord]
+        if date.namesADay {
+            let spans = date.dayIntervals(calendar: calendar,
+                                          yearsBack: libraryReach(context: context, calendar: calendar))
+            pool = LibraryQuery.assets(in: spans, options: options, context: context)
+        } else {
+            pool = LibraryQuery.allRecords(context: context)
+                .filter { LibraryQuery.passes($0, options: options) }
+        }
 
         // Favourites — the user's own mark, in Photos or here.
         if lowered.contains("favourite") || lowered.contains("favorite") || lowered.contains("loved") {
@@ -119,19 +139,17 @@ struct SearchView: View {
             described.append("favourites")
         }
 
-        // Year
-        let calendar = Calendar.current
-        if let year = Int(lowered.filter(\.isNumber)), (1900...2200).contains(year) {
-            pool = pool.filter { calendar.component(.year, from: $0.creationDate) == year }
-            described.append(String(year))
+        // Date. A named day was already applied by the fetch above; a loose month or year narrows
+        // the whole library here, because either can span all of it.
+        if !date.namesADay {
+            if let year = date.year {
+                pool = pool.filter { calendar.component(.year, from: $0.creationDate) == year }
+            }
+            if let month = date.month {
+                pool = pool.filter { calendar.component(.month, from: $0.creationDate) == month }
+            }
         }
-
-        // Month by name
-        let months = calendar.monthSymbols.map { $0.lowercased() }
-        if let index = months.firstIndex(where: { lowered.contains($0) }) {
-            pool = pool.filter { calendar.component(.month, from: $0.creationDate) == index + 1 }
-            described.append(calendar.monthSymbols[index])
-        }
+        if let phrase = date.phrase(calendar: calendar) { described.append(phrase) }
 
         // Place, matched against occasions that have been named
         let placeMatches = namedEventIdentifiers(matching: lowered, context: context)
@@ -147,6 +165,17 @@ struct SearchView: View {
             : "Showing \(described.joined(separator: " · ")) — \(results.count) items."
     }
 
+    /// How many years back the library actually goes.
+    ///
+    /// A day typed without a year means every one of them, so the search reaches as far as the
+    /// photos do instead of stopping at the twenty years the other time windows assume.
+    private func libraryReach(context: ModelContext, calendar: Calendar) -> Int {
+        guard let oldest = LibraryQuery.allRecords(context: context, newestFirst: false, limit: 1).first
+        else { return 0 }
+        let earliest = calendar.component(.year, from: oldest.creationDate)
+        return max(0, calendar.component(.year, from: .now) - earliest)
+    }
+
     private func namedEventIdentifiers(matching term: String, context: ModelContext) -> Set<String> {
         let descriptor = FetchDescriptor<EventCluster>()
         guard let events = try? context.fetch(descriptor) else { return [] }
@@ -160,5 +189,120 @@ struct SearchView: View {
         )
         guard let all = try? context.fetch(descriptor) else { return [] }
         return all.filter { $0.name.lowercased().contains(term) }
+    }
+}
+
+// MARK: - Date terms
+
+/// A date pulled out of whatever the user typed.
+///
+/// The three parts are found independently, because people write them in whichever order
+/// occurs to them and usually leave one out — "7 August", "Aug 7 2024", "2024-08-07",
+/// "August". A missing part widens the search instead of failing it.
+private struct DateTerms {
+    var year: Int?
+    var month: Int?
+    var day: Int?
+
+    /// Wide enough for scanned family photographs, narrow enough that a stray number in a
+    /// place name is not mistaken for a year.
+    private static let plausibleYears = 1900...2200
+    private static let ordinals = ["st", "nd", "rd", "th"]
+
+    init(text: String, calendar: Calendar) {
+        // Numbers are set aside and read last. Until the whole query has been seen there is no
+        // way to tell whether the 7 in "7 August" is a day or noise.
+        var numbers: [Int] = []
+
+        for token in text.split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "-" && $0 != "/" }) {
+            if let written = Self.numericDate(token) {
+                year = written.year
+                month = written.month
+                day = written.day
+            } else if let named = Self.monthIndex(token, calendar: calendar) {
+                month = month ?? named
+            } else if let number = Self.number(token) {
+                numbers.append(number)
+            }
+        }
+
+        for number in numbers where Self.plausibleYears.contains(number) {
+            year = year ?? number
+        }
+        // A loose number only becomes a day once a month is on the table. On its own it is far
+        // more likely to belong to a place or a collection name, and it never meant a date before.
+        if month != nil {
+            for number in numbers where (1...31).contains(number) {
+                day = day ?? number
+            }
+        }
+    }
+
+    /// True once there is a single day to look at rather than a whole month or year.
+    var namesADay: Bool { month != nil && day != nil }
+
+    /// The spans to fetch for a named day. Without a year the day is shown in every year the
+    /// library holds — this app is about time, so "the 7th of August" means all of them.
+    func dayIntervals(calendar: Calendar, yearsBack: Int) -> [DateInterval] {
+        guard let month, let day else { return [] }
+        guard let year else {
+            return TimeWindow.dayAcrossYears(month: month, day: day)
+                .intervals(calendar: calendar, yearsBack: yearsBack)
+        }
+        return [calendar.interval(year: year, month: month, day: day)].compactMap { $0 }
+    }
+
+    /// What was understood, for the line above the results.
+    func phrase(calendar: Calendar) -> String? {
+        if let month, let day {
+            let named = TimeWindow.dayAcrossYears(month: month, day: day)
+            guard let year else { return "\(named.title) in every year" }
+            let components = DateComponents(year: year, month: month, day: day)
+            guard let date = calendar.date(from: components) else { return named.title }
+            return date.formatted(.dateTime.day().month(.wide).year())
+        }
+
+        var parts: [String] = []
+        if let month, calendar.monthSymbols.indices.contains(month - 1) {
+            parts.append(calendar.monthSymbols[month - 1])
+        }
+        if let year { parts.append(String(year)) }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+
+    /// "2024-08-07" — the one all-numeric spelling whose order is not in doubt. Something like
+    /// "8/7" is deliberately left alone, because half the world reads it the other way round.
+    private static func numericDate(_ token: Substring) -> (year: Int, month: Int, day: Int?)? {
+        let parts = token.split(whereSeparator: { $0 == "-" || $0 == "/" })
+        guard (2...3).contains(parts.count), parts[0].count == 4,
+              let year = Int(parts[0]), plausibleYears.contains(year),
+              let month = Int(parts[1]), (1...12).contains(month)
+        else { return nil }
+
+        guard parts.count == 3 else { return (year, month, nil) }
+        guard let day = Int(parts[2]), (1...31).contains(day) else { return nil }
+        return (year, month, day)
+    }
+
+    /// Full names are matched inside the token, so "august2024" still reads as August.
+    /// Abbreviations have to be the whole token, or "mar" would fire on "marathon".
+    private static func monthIndex(_ token: Substring, calendar: Calendar) -> Int? {
+        let word = String(token)
+        if let index = calendar.monthSymbols.firstIndex(where: { word.contains($0.lowercased()) }) {
+            return index + 1
+        }
+        if let index = calendar.shortMonthSymbols.firstIndex(where: { word == $0.lowercased() }) {
+            return index + 1
+        }
+        return nil
+    }
+
+    private static func number(_ token: Substring) -> Int? {
+        let digits = token.prefix(while: \.isNumber)
+        guard !digits.isEmpty else { return nil }
+        // "7th August" is how a great many people type a date.
+        let tail = token.dropFirst(digits.count)
+        guard tail.isEmpty || ordinals.contains(String(tail)) else { return nil }
+        return Int(digits)
     }
 }

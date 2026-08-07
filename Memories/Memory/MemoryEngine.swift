@@ -444,14 +444,12 @@ actor MemoryEngine {
 
     // MARK: Scoring helpers
 
+    /// Indexed on `localIdentifier` rather than fetching the whole table and filtering it.
+    /// The feed calls this once per candidate, so at library scale the difference between a
+    /// predicate and a full pass is the difference between a feed and a stall.
     private func records(for identifiers: [String], options: CurationOptions) -> [AssetRecord] {
-        guard !identifiers.isEmpty else { return [] }
-        let wanted = Set(identifiers)
-        let descriptor = FetchDescriptor<AssetRecord>(
-            sortBy: [SortDescriptor(\.creationDate, order: .forward)]
-        )
-        guard let all = try? modelContext.fetch(descriptor) else { return [] }
-        return all.filter { wanted.contains($0.localIdentifier) && LibraryQuery.passes($0, options: options) }
+        LibraryQuery.records(for: identifiers, context: modelContext)
+            .filter { LibraryQuery.passes($0, options: options) }
     }
 
     private func averageQuality(_ assets: [AssetRecord]) -> Double {
