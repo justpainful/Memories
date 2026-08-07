@@ -251,6 +251,15 @@ extension Calendar {
         components.day = day ?? 1
         guard let start = self.date(from: components) else { return nil }
 
+        // `date(from:)` normalises overflow forward instead of rejecting it, so asking for
+        // 29 February in a non-leap year silently hands back 1 March — and the Calendar
+        // screen would then show a day's photos under the wrong date. Check that what came
+        // back is what was asked for, and report nothing when the date does not exist.
+        let produced = dateComponents([.year, .month, .day], from: start)
+        guard produced.year == components.year,
+              produced.month == components.month,
+              produced.day == components.day else { return nil }
+
         let unit: Calendar.Component = day != nil ? .day : (month != nil ? .month : .year)
         return dateInterval(of: unit, for: start)
     }

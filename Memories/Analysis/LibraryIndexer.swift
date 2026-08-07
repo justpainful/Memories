@@ -637,10 +637,10 @@ actor LibraryIndexer {
                 record.eventClusterID = nil
             }
         }
-        modelContext.analysisState.stageProgress = [:]
+        state.stageProgress = [:]
         // There are no groups left to be in step with, so the next pass must rebuild them
         // whatever the change counters happen to say.
-        modelContext.analysisState.analysisVersion = 0
+        state.analysisVersion = 0
         modelContext.saveIfNeeded()
     }
 }

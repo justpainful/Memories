@@ -118,16 +118,16 @@ final class AnalysisCoordinator {
         // Clustering reads and rewrites the whole table, so it only earns its cost when
         // something has actually moved since the groups were last built.
         if await indexer.needsClusterRebuild() {
-            await setStage(.events, progress: 0)
+            await setStage(.events, progress: 0, through: indexer)
             await indexer.rebuildSimilarityClusters()
-            await setStage(.events, progress: 0.5)
+            await setStage(.events, progress: 0.5, through: indexer)
             await indexer.rebuildEvents()
             // Who somebody is only emerges from seeing every face at once, so this belongs
             // with the other whole-library passes rather than with any one photo.
             await indexer.rebuildPeople()
             await indexer.markClustersRebuilt()
         }
-        await setStage(.events, progress: 1)
+        await setStage(.events, progress: 1, through: indexer)
 
         await runMemories(indexer)
 
@@ -139,7 +139,7 @@ final class AnalysisCoordinator {
 
     /// Stage 1. Fast, and the point at which the app stops being empty.
     private func runMetadata(_ indexer: LibraryIndexer) async {
-        await setStage(.metadata, progress: 0)
+        await setStage(.metadata, progress: 0, through: indexer)
 
         let expected = max(1, PhotoLibraryService.currentAssetCount())
         var seen = Set<String>()
@@ -170,16 +170,16 @@ final class AnalysisCoordinator {
         }
         indexedCount = total
         hasUsableIndex = total > 0
-        await setStage(.thumbnails, progress: 1)
+        await setStage(.thumbnails, progress: 1, through: indexer)
     }
 
     /// Stages 3 and 4, batched and throttled by what the device can afford.
     private func runPixels(_ indexer: LibraryIndexer) async {
-        await setStage(.similarity, progress: 0)
+        await setStage(.similarity, progress: 0, through: indexer)
 
         let initialPending = await indexer.pendingPixelCount()
         guard initialPending > 0 else {
-            await setPixelProgress(1)
+            await setPixelProgress(1, through: indexer)
             return
         }
         var remaining = initialPending
@@ -202,13 +202,13 @@ final class AnalysisCoordinator {
             remaining = max(0, remaining - batch.count)
             pendingCount = remaining
             let done = Double(initialPending - remaining) / Double(initialPending)
-            await setPixelProgress(done)
+            await setPixelProgress(done, through: indexer)
 
             try? await Task.sleep(for: allowance.pauseBetweenBatches)
         }
 
         pauseReason = nil
-        await setPixelProgress(1)
+        await setPixelProgress(1, through: indexer)
     }
 
     /// Decode and analyse a batch, a few frames at a time.
@@ -218,16 +218,22 @@ final class AnalysisCoordinator {
     /// other one is using. A few in flight overlap those waits.
     ///
     /// The ceiling is deliberately low. Every frame in flight is a decoded image held in
-    /// memory and four Vision requests competing for the same silicon, so past a handful the
-    /// spare capacity is imaginary and only the memory high-water mark keeps climbing. The
-    /// pause between batches, and the batch size itself, still belong to `DeviceConditions` —
-    /// a hot phone runs two at a time in batches of eight, not four in batches of twenty-four.
+    /// memory and half a dozen Vision requests competing for the same silicon, so past a
+    /// handful the spare capacity is imaginary and only the memory high-water mark keeps
+    /// climbing. The pause between batches, and the batch size itself, still belong to
+    /// `DeviceConditions` — a hot phone runs two at a time in batches of eight, not four in
+    /// batches of twenty-four.
+    ///
+    /// Reports how many frames were actually analysed, which is what a live change has to
+    /// know: each of those is a new feature print the groups do not yet reflect.
+    @discardableResult
     private func analyze(_ batch: [PendingAsset],
                          allowance: WorkAllowance,
-                         through indexer: LibraryIndexer) async {
-        guard !batch.isEmpty else { return }
+                         through indexer: LibraryIndexer) async -> Int {
+        guard !batch.isEmpty else { return 0 }
         let assets = PhotoLibraryService.assets(for: batch.map(\.identifier))
         let limit = concurrency(for: allowance)
+        var analyzed = 0
 
         await withTaskGroup(of: PixelResult.self) { group in
             var queue = batch[...]
@@ -240,6 +246,7 @@ final class AnalysisCoordinator {
 
             while let result = await group.next() {
                 await Self.write(result, through: indexer)
+                if case .analyzed = result.outcome { analyzed += 1 }
 
                 // Cancellation stops the queue rather than the work already in flight: those
                 // frames have been decoded and analysed, and throwing the answers away would
@@ -249,6 +256,7 @@ final class AnalysisCoordinator {
                 group.addTask { await Self.pixelWork(for: pending, asset: asset) }
             }
         }
+        return analyzed
     }
 
     private func concurrency(for allowance: WorkAllowance) -> Int {
@@ -260,8 +268,8 @@ final class AnalysisCoordinator {
     /// Where the file came from is read here rather than in the metadata pass because
     /// `PHAssetResource.assetResources(for:)` is a lookup per asset, and the metadata pass is
     /// the one the user is waiting on before the app has anything at all to show. Here it sits
-    /// alongside a decode and four Vision requests, which cost incomparably more, and it is
-    /// only ever done once per asset.
+    /// alongside a decode and every Vision request the pipeline makes, which cost incomparably
+    /// more, and it is only ever done once per asset.
     private nonisolated static func pixelWork(for pending: PendingAsset,
                                               asset: PHAsset?) async -> PixelResult {
         guard let asset else {
@@ -309,10 +317,9 @@ final class AnalysisCoordinator {
     /// Feature prints and quality come out of one decode, so both stages advance on the same
     /// number rather than leaving similarity reading zero forever. The status line names
     /// quality, because that is the half still being worked on when a batch reports.
-    private func setPixelProgress(_ value: Double) async {
+    private func setPixelProgress(_ value: Double, through indexer: LibraryIndexer) async {
         stage = .quality
         progress = value
-        let indexer = LibraryIndexer(modelContainer: container)
         await indexer.updateState {
             $0.stageProgress[AnalysisStage.similarity.rawValue] = value
             $0.stageProgress[AnalysisStage.quality.rawValue] = value
@@ -326,15 +333,19 @@ final class AnalysisCoordinator {
     /// that is actually true at this point: every input the memory engine reads now exists.
     /// An empty library stops short of 1, which is honest — there is nothing to remember yet.
     private func runMemories(_ indexer: LibraryIndexer) async {
-        await setStage(.memories, progress: 0)
+        await setStage(.memories, progress: 0, through: indexer)
         guard await indexer.totalCount() > 0 else { return }
-        await setStage(.memories, progress: 1)
+        await setStage(.memories, progress: 1, through: indexer)
     }
 
-    private func setStage(_ stage: AnalysisStage, progress: Double) async {
+    /// The pass's own indexer, rather than one made for the occasion: a progress update is a
+    /// write to the same row the pass is counting on, and two contexts holding that row is how
+    /// one of them ends up saving what the other had already moved on from.
+    private func setStage(_ stage: AnalysisStage,
+                          progress: Double,
+                          through indexer: LibraryIndexer) async {
         self.stage = stage
         self.progress = progress
-        let indexer = LibraryIndexer(modelContainer: container)
         await indexer.updateState { $0.stageProgress[stage.rawValue] = progress
                                     $0.currentStageRaw = stage.rawValue }
     }
@@ -385,10 +396,12 @@ final class AnalysisCoordinator {
             return
         }
 
+        // A hot or nearly flat phone gets the row and nothing more; the next pass will find
+        // the pixels still owing, exactly as it would for a photo taken while the app was shut.
         let allowance = DeviceConditions.current()
         if allowance.allowsPixelWork {
             let pending = await indexer.pendingPixelWork(among: changed.map(\.localIdentifier))
-            await analyze(pending, allowance: allowance, through: indexer)
+            handled.updated += await analyze(pending, allowance: allowance, through: indexer)
         }
 
         let dates = changed.map(\.creationDate) + removal.dates

@@ -124,13 +124,11 @@ enum EventClustering {
             if !breaks, let distance = distance(previous, item), distance > distanceThreshold {
                 breaks = true
             }
-            // A late-night session that rolls past midnight is still one night out, so the
-            // calendar day only ends an event when there is also a real pause.
-            if !breaks,
-               !Calendar.current.isDate(previous.date, inSameDayAs: item.date),
-               gap > 6 * 3600 {
-                breaks = true
-            }
+            // There is deliberately no calendar-day rule here. A late-night session that rolls
+            // past midnight is still one night out, and any gap long enough to be worth
+            // splitting on has already been split by `gapThreshold` — a day-boundary check
+            // could only ever fire on a gap that rule had just declined to break, which is
+            // precisely the case it must not break.
 
             if breaks {
                 events.append(current)
