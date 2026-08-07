@@ -11,12 +11,18 @@ import XCTest
 /// actually grant photo-library access on current runtimes, so the app sits behind the
 /// system permission alert. Only UI automation can answer that dialog.
 ///
-/// The tour never fails on a missed tap. A control that is momentarily not hittable is a
-/// timing artifact of driving a live animation, not a defect, and abandoning the run over
-/// one would throw away every screenshot after it. Only a crash fails this test.
+/// **A missed tap does not stop the tour, but it does fail the run.** Abandoning at the first
+/// missed control would throw away every screenshot after it, and those screenshots are the
+/// entire point. So each step records where it actually landed and carries on; the assertions
+/// are collected and reported together at the end. The previous arrangement — never fail on a
+/// missed tap — meant a run where the tour got stuck in the photo viewer and photographed it
+/// eight times still reported success, which is the one outcome worse than a red build.
 final class MemoriesUITests: XCTestCase {
 
     private var app: XCUIApplication!
+
+    /// Steps that photographed something other than what they went looking for.
+    private var missteps: [String] = []
 
     override func setUpWithError() throws {
         continueAfterFailure = true
@@ -33,48 +39,57 @@ final class MemoriesUITests: XCTestCase {
         // Metadata indexing is quick; the Vision passes are not. Wait for the feed to have
         // something rather than racing it.
         waitForFeed()
-        capture("01-home")
+        capture("01-home", expecting: "Memories")
 
         safeTap(app.buttons["Explore time"])
         capture("02-explore-time")
         if !safeTap(app.buttons["Close"]) { app.tap() }
         settle()
 
+        returnToRoot()
         safeTap(app.buttons["memory.card"].firstMatch)
         capture("03-memory")
 
         safeTap(app.scrollViews.buttons.element(boundBy: 2))
         capture("04-viewer")
-        leaveViewer()
-        goBack()
-        dismissAnySheet()
 
         returnToRoot()
         safeTap(app.buttons["Timeline"].firstMatch)
-        capture("05-timeline")
+        capture("05-timeline", expecting: "Timeline")
 
         returnToRoot()
         safeTap(app.buttons["Library"].firstMatch)
-        capture("06-library")
+        capture("06-library", expecting: "Library")
 
+        // Places is in this list because the fixture goes to the trouble of writing three
+        // separate GPS clusters into the seed photos, and until now nothing ever photographed
+        // the screen that reads them.
         for (row, name) in [("People", "07-people"), ("Best Of", "08-best-of"),
-                            ("Calendar", "09-calendar"), ("Search", "10-search")] {
+                            ("Calendar", "09-calendar"), ("Places", "10-places"),
+                            ("Search", "11-search"), ("Collections", "12-collections")] {
             openRow(row)
-            capture(name)
+            capture(name, expecting: row)
             returnToRoot()
             safeTap(app.buttons["Library"].firstMatch)
         }
 
         openRow("Settings")
-        capture("11-settings")
+        capture("13-settings", expecting: "Settings")
         openRow("Local Processing")
-        capture("12-privacy")
-        returnToRoot()
+        capture("14-privacy", expecting: "Privacy")
 
+        returnToRoot()
         safeTap(app.buttons["Memories"].firstMatch)
-        capture("13-home-again")
+        capture("15-home-again", expecting: "Memories")
 
         XCTAssertTrue(app.state == .runningForeground, "The app did not survive the tour")
+        if !missteps.isEmpty {
+            XCTFail("""
+                The tour did not reach \(missteps.count) of its surfaces. Each line is a \
+                screenshot that shows the wrong screen:
+                \(missteps.joined(separator: "\n"))
+                """)
+        }
     }
 
     // MARK: Steps
@@ -101,22 +116,6 @@ final class MemoriesUITests: XCTestCase {
         settle()
     }
 
-    /// Leave the full-screen viewer.
-    ///
-    /// Swiping down is tried first because it is the gesture that always works: the controls
-    /// fade after a couple of seconds, so reaching for the Back button means racing a timer
-    /// that has usually already expired by the time the screenshot is taken.
-    private func leaveViewer() {
-        for _ in 0..<3 {
-            guard app.buttons["Back"].exists || app.otherElements["Back"].exists
-                    || !app.navigationBars.firstMatch.exists else { break }
-            app.swipeDown()
-            settle()
-        }
-        if app.buttons["Back"].exists { safeTap(app.buttons["Back"]) }
-        settle()
-    }
-
     private func openRow(_ label: String) {
         if !safeTap(app.buttons[label].firstMatch, fallback: app.staticTexts[label].firstMatch) {
             safeTap(app.cells.containing(.staticText, identifier: label).firstMatch)
@@ -124,23 +123,47 @@ final class MemoriesUITests: XCTestCase {
         settle()
     }
 
-    private func goBack() {
-        safeTap(app.navigationBars.buttons.element(boundBy: 0))
-        settle()
+    // MARK: Getting back
+
+    /// The tab bar is drawn by the app's own root and stays visible over pushed screens, so it
+    /// is the one signal that says whether something modal is covering everything. The photo
+    /// viewer and every sheet hide it; a pushed navigation screen does not.
+    private var tabBarIsReachable: Bool {
+        app.buttons["Memories"].firstMatch.isHittable
     }
 
     /// Get back to a tab's own root before doing anything else.
     ///
-    /// The tour previously assumed one `goBack()` was enough. When a step failed to open what
-    /// it expected, the app stayed one screen deep, the tab buttons underneath were
-    /// unreachable, and every later capture photographed the same view — which reads in the
-    /// artifacts as though the whole app were broken.
+    /// This is the step the tour cannot afford to get wrong. When it failed, the app stayed
+    /// inside the photo viewer, the tab buttons underneath were unreachable, and every later
+    /// capture photographed the same photograph — which reads in the artifacts as though the
+    /// whole app were broken.
+    ///
+    /// It runs in two parts because there are two different things to escape, and the order
+    /// matters: anything modal first (it hides the tab bar and swallows every tap), then any
+    /// pushed screens underneath it.
     private func returnToRoot() {
-        dismissAnySheet()
+        for _ in 0..<4 {
+            if tabBarIsReachable { break }
+
+            // A sheet has a Done button; take it if it is there.
+            dismissAnySheet()
+            if tabBarIsReachable { break }
+
+            // Otherwise this is the full-screen photo viewer. Its controls fade after a couple
+            // of seconds, so wake them with a tap before reaching for the Back button, and fall
+            // back to the downward throw — the gesture the viewer exists to support — if the
+            // button still is not there.
+            app.tap()
+            settle()
+            if safeTap(app.buttons["Back"]) { continue }
+            app.swipeDown()
+            settle()
+        }
+
         for _ in 0..<4 {
             let back = app.navigationBars.buttons.element(boundBy: 0)
-            guard back.exists, back.isHittable,
-                  app.buttons["Memories"].firstMatch.isHittable == false else { break }
+            guard back.exists, back.isHittable else { break }
             back.tap()
             settle()
         }
@@ -179,13 +202,32 @@ final class MemoriesUITests: XCTestCase {
         sleep(2)
     }
 
-    /// Photograph the screen, then make sure nothing is left covering it. A sheet that stays
-    /// open swallows every later tap and the rest of the tour photographs the same view.
-    private func capture(_ name: String) {
+    /// Photograph the screen, then check it is the screen the step went looking for.
+    ///
+    /// The screenshot is taken first on purpose: a capture that landed on the wrong screen is
+    /// the most useful picture in the artifact, so it is kept and named either way.
+    private func capture(_ name: String, expecting screen: String? = nil) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+
+        if let screen, !app.navigationBars[screen].waitForExistence(timeout: 5) {
+            missteps.append("  \(name).png — expected the \(screen) screen, but it shows \(whereAmI())")
+        }
         dismissAnySheet()
+    }
+
+    /// A short description of the screen actually on display, for the failure message. Without
+    /// this a red run says only that a screenshot was wrong, and finding out which screen it
+    /// settled on means opening thirteen PNGs by hand.
+    private func whereAmI() -> String {
+        let titles = app.navigationBars.allElementsBoundByIndex
+            .map(\.identifier)
+            .filter { !$0.isEmpty }
+        if titles.isEmpty {
+            return tabBarIsReachable ? "an untitled screen" : "a full-screen cover or sheet"
+        }
+        return titles.joined(separator: " › ")
     }
 }

@@ -113,9 +113,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p Attachments Screenshots
+
+          # Non-fatal, but not silent. This used to redirect everything to /dev/null, which is
+          # how the export quietly stopped producing the names the screenshots are keyed by
+          # without anyone noticing for several runs.
           xcrun xcresulttool export attachments \
             --path Result.xcresult \
-            --output-path Attachments >/dev/null 2>&1 || true
+            --output-path Attachments || echo "::warning::xcresulttool could not export attachments"
 
           # The export mixes images with logs and extension-less blobs; upload only the
           # named screenshots so the artifact is readable and the upload is predictable.
