@@ -5,7 +5,7 @@ import Foundation
 /// Kept as named parts rather than one opaque number so the ranking can be reasoned about,
 /// and so `recentExposure` can do its job: a memory you were shown yesterday has to be
 /// genuinely better than the alternatives to earn its place again.
-struct ScoreComponents: Sendable, Equatable {
+struct ScoreComponents: Sendable, Equatable, Hashable {
     var relevance: Double = 0        // how strongly this window matches today
     var quality: Double = 0          // how good the frames in it actually are
     var novelty: Double = 0          // how long since these assets were last surfaced
@@ -26,7 +26,7 @@ struct ScoreComponents: Sendable, Equatable {
 }
 
 /// A memory the engine is proposing, before anything has been shown to anyone.
-struct MemoryCandidate: Sendable, Identifiable, Equatable {
+struct MemoryCandidate: Sendable, Identifiable, Equatable, Hashable {
     var id: String
     var kind: MemoryKind
     var title: String

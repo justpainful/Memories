@@ -34,14 +34,21 @@ own Photos / Journal / Books — **not** a startup product, not a SaaS, not a "d
 
 ## Locked design tokens (already implemented — please match exactly)
 
+**The chrome is the system's — there is no house colour.** Every value below is a UIKit
+system colour, which is what makes the app read as part of iOS instead of as a branded
+product. All the colour on screen comes from the photographs themselves (the feed's top
+carries a faint wash sampled from the hero image) and from nowhere else.
+
 | Token | Light | Dark |
 |---|---|---|
-| Canvas | `#FAF8F6` (warm paper) | `#0C0B0A` |
-| Raised surface | `#FFFFFF` | `#161514` |
-| Text primary | `#12100E` | `#F4F1ED` |
-| Text secondary | primary @ 55% | primary @ 60% |
-| Accent / tint ("Ember") | `#B65B2E` | `#E8894F` |
-| Hairline | black @ 8% | white @ 10% |
+| Canvas | `systemBackground` — pure white | pure black |
+| Raised surface | `secondarySystemGroupedBackground` | same |
+| Text primary / secondary / tertiary | `label` / `secondaryLabel` / `tertiaryLabel` | same |
+| Tint (links, toggles, selection) | system blue `#007AFF` | `#0A84FF` |
+| Hairline | `separator` | same |
+
+Do **not** introduce an accent hue of your own — no orange, no teal, no brand gradient.
+The app icon is warm, the interface is not; that is the same split Photos uses.
 
 - **Type — two families, strictly separated:**
   - **New York (serif)** — the *editorial* layer only: memory titles, section headlines,

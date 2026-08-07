@@ -33,12 +33,15 @@ struct CurationOptions: Sendable, Equatable {
     /// and their own switch in Settings.
     var includeScreenshots = false
     var includeScreenRecordings = false
+    /// Images that arrived rather than were taken — saved pictures, receipts, documents.
+    var includeDownloads = false
     /// Hidden means hidden from Memories, never deleted. Only the Hidden screen sets this.
     var includeHiddenFromMemories = false
 
     static let feed = CurationOptions()
     static let browsing = CurationOptions(mode: .pure, includeScreenshots: true,
-                                          includeScreenRecordings: true)
+                                          includeScreenRecordings: true,
+                                          includeDownloads: true)
 }
 
 // MARK: - Fetching
@@ -78,6 +81,7 @@ enum LibraryQuery {
     static func passes(_ record: AssetRecord, options: CurationOptions) -> Bool {
         if !options.includeHiddenFromMemories && record.excludedFromMemories { return false }
         if !record.isLocallyAvailable { return false }
+        if !options.includeDownloads && record.isUtilityImage && !record.isScreenshot { return false }
 
         switch options.media {
         case .all:
@@ -94,6 +98,17 @@ enum LibraryQuery {
             guard record.isScreenshot else { return false }
         }
         return true
+    }
+
+    /// Rows for a known set of identifiers, in library order.
+    static func records(for identifiers: [String], context: ModelContext) -> [AssetRecord] {
+        guard !identifiers.isEmpty else { return [] }
+        let wanted = identifiers
+        let descriptor = FetchDescriptor<AssetRecord>(
+            predicate: #Predicate { wanted.contains($0.localIdentifier) },
+            sortBy: [SortDescriptor(\.creationDate, order: .forward)]
+        )
+        return (try? context.fetch(descriptor)) ?? []
     }
 
     static func allRecords(context: ModelContext,

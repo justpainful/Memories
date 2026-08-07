@@ -120,6 +120,7 @@ actor LibraryIndexer {
         record.faceQuality = analysis.bestFaceQuality
         record.sharpness = analysis.sharpness
         record.averageColor = analysis.averageColor
+        record.isUtilityImage = analysis.isUtility
         record.memoryScore = QualityScorer.score(inputs(for: record, analysis: analysis))
         record.analysisVersion = currentAnalysisVersion
         modelContext.saveIfNeeded()

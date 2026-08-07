@@ -46,6 +46,11 @@ final class AssetRecord {
     var sharpness: Double?
     var averageColor: Int = 0
 
+    /// Vision's judgement that this is a document, receipt or saved image rather than a
+    /// photograph. It is the only signal available for "this arrived here, it wasn't taken
+    /// here", which is what the Include Downloads setting really means.
+    var isUtilityImage: Bool = false
+
     /// The blended Memory Quality Score. Internal ranking only — never surfaced as a number.
     var memoryScore: Double = 0
 

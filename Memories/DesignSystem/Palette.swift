@@ -1,29 +1,35 @@
 import SwiftUI
 
-/// Colour is deliberately scarce in this app: the photographs carry it, the chrome stays
-/// near-neutral and slightly warm so images read like prints on paper rather than tiles on
-/// a screen. Everything here is defined in both appearances so nothing has to be guessed
-/// at call sites.
+/// The chrome is the system's, not ours.
+///
+/// Every value here maps to a UIKit system colour, which is what makes the app read as part
+/// of iOS rather than as a product with a brand palette: pure white on white, pure black on
+/// black, the same separators and label greys Settings and Photos use, and the system tint
+/// for anything interactive.
+///
+/// The app's colour comes from the photographs — the ambient wash behind the feed is sampled
+/// from the hero image — and from nowhere else. There is deliberately no house hue.
 enum Palette {
-    static let canvas       = Color(light: 0xFAF8F6, dark: 0x0C0B0A)
-    static let surface      = Color(light: 0xFFFFFF, dark: 0x161514)
-    static let surfaceSunk  = Color(light: 0xF1EDE8, dark: 0x1E1C1A)
+    static let canvas      = Color(uiColor: .systemBackground)
+    static let surface     = Color(uiColor: .secondarySystemGroupedBackground)
+    static let surfaceSunk = Color(uiColor: .secondarySystemFill)
 
-    static let textPrimary  = Color(light: 0x12100E, dark: 0xF4F1ED)
-    static let textSecondary = Color(light: 0x12100E, dark: 0xF4F1ED).opacity(0.55)
-    static let textTertiary = Color(light: 0x12100E, dark: 0xF4F1ED).opacity(0.35)
+    static let textPrimary   = Color(uiColor: .label)
+    static let textSecondary = Color(uiColor: .secondaryLabel)
+    static let textTertiary  = Color(uiColor: .tertiaryLabel)
 
-    /// "Ember" — the single accent. Used for selection and emphasis, never as a background wash.
-    static let accent       = Color(light: 0xB65B2E, dark: 0xE8894F)
+    /// The system tint. Selected tabs, links, toggles — the same blue every stock app uses.
+    static let accent = Color.accentColor
 
-    static let hairline     = Color(light: 0x000000, dark: 0xFFFFFF).opacity(0.09)
+    static let hairline = Color(uiColor: .separator)
 
     /// Scrim over photography so overlaid type stays legible without dimming the image.
-    static let photoScrim   = Color.black.opacity(0.34)
+    static let photoScrim = Color.black.opacity(0.34)
 }
 
 extension Color {
-    /// Dynamic colour from two hex literals, resolved by the trait environment.
+    /// Dynamic colour from two hex literals, for the few places that need a specific value
+    /// the system does not provide.
     init(light: UInt32, dark: UInt32) {
         self.init(uiColor: UIColor { traits in
             UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)

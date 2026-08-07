@@ -1,61 +1,97 @@
 import SwiftUI
 
-enum AppTab: Hashable {
+enum AppTab: String, Hashable, CaseIterable, Identifiable {
     case memories, timeline, library
-}
 
-/// Three tabs, as decided: the smart feed, the whole library in time order, and direct
-/// access by kind. Calendar, Places and Search live *inside* Timeline and Library rather
-/// than claiming tabs of their own.
-///
-/// This is the native iOS 26 `TabView`, which renders its own Liquid Glass bar. Nothing
-/// here fakes a floating control out of a blurred rectangle.
-struct RootView: View {
-    @State private var selection: AppTab = .memories
+    var id: String { rawValue }
 
-    var body: some View {
-        TabView(selection: $selection) {
-            Tab("Memories", systemImage: "rectangle.stack", value: AppTab.memories) {
-                PlaceholderSurface(
-                    title: "Memories",
-                    line: "Your photos. Remembered privately."
-                )
-            }
-            Tab("Timeline", systemImage: "calendar.day.timeline.left", value: AppTab.timeline) {
-                PlaceholderSurface(title: "Timeline", line: "Every year you have photographed.")
-            }
-            Tab("Library", systemImage: "square.grid.2x2", value: AppTab.library) {
-                PlaceholderSurface(title: "Library", line: "Everything, by kind.")
-            }
+    var title: String {
+        switch self {
+        case .memories: return "Memories"
+        case .timeline: return "Timeline"
+        case .library:  return "Library"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .memories: return "rectangle.stack"
+        case .timeline: return "calendar.day.timeline.left"
+        case .library:  return "square.grid.2x2"
         }
     }
 }
 
-/// Temporary scaffold so the shell can be built and screenshotted before the real
-/// surfaces land. Replaced feature by feature.
-private struct PlaceholderSurface: View {
-    let title: String
-    let line: String
+/// Three tabs, as decided. Calendar, Places and Search are surfaces inside Timeline and
+/// Library rather than tabs of their own.
+///
+/// The three stacks stay alive behind one another so switching tabs keeps scroll position,
+/// which is what the system bar would have given us and what the custom bar must not lose.
+struct RootView: View {
+    @Environment(\.app) private var app
+    @Environment(\.scenePhase) private var scenePhase
+
+    @State private var selection: AppTab = .memories
+    @State private var isExploring = false
+    @State private var exploreDestination: TimeWindow?
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.m) {
-                    Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
-                        .font(Typo.dateHeadline)
-                        .foregroundStyle(Palette.textSecondary)
-                    Text(line)
-                        .font(Typo.memoryTitle)
-                        .foregroundStyle(Palette.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Space.gutter)
-                .padding(.top, Space.l)
+        Group {
+            if shouldShowOnboarding {
+                OnboardingView()
+                    .transition(.opacity)
+            } else {
+                main
             }
-            .background(Palette.canvas)
-            .navigationTitle(title)
         }
+        .animation(.smooth(duration: 0.35), value: shouldShowOnboarding)
+        .preferredColorScheme(app.settings.preferredColorScheme)
+        .task { app.startIndexingIfPossible() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                app.library.refreshAccess()
+                app.startIndexingIfPossible()
+            }
+        }
+    }
+
+    private var shouldShowOnboarding: Bool {
+        !app.hasSeenOnboarding || app.library.access == .notDetermined
+    }
+
+    private var main: some View {
+        ZStack(alignment: .bottom) {
+            ZStack {
+                surface(.memories) { HomeView() }
+                surface(.timeline) { TimelineView() }
+                surface(.library)  { LibraryView() }
+            }
+
+            // Dim the content while the time panel is open so it reads as the front layer.
+            if isExploring {
+                Color.black.opacity(0.18)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .onTapGesture { isExploring = false }
+            }
+
+            ExploreTimeBar(selection: $selection, isExploring: $isExploring) { window in
+                exploreDestination = window
+            }
+        }
+        .animation(.smooth(duration: 0.42), value: isExploring)
+        .sheet(item: $exploreDestination) { window in
+            TimeWindowResultsView(window: window)
+        }
+    }
+
+    /// Keeps every tab mounted; only the selected one is visible and interactive.
+    private func surface<Content: View>(_ tab: AppTab,
+                                        @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .opacity(selection == tab ? 1 : 0)
+            .allowsHitTesting(selection == tab)
+            .accessibilityHidden(selection != tab)
     }
 }
 
