@@ -15,8 +15,16 @@ import re
 import shutil
 import sys
 
-# `01-home_0_<uuid>.png` -> `01-home`
-NAMED = re.compile(r"^(.*?)_\d+_[0-9A-Fa-f-]{36}\.png$")
+# Exported names carry a UUID and sometimes an index: `01-home_0_<uuid>.png`. The exact
+# shape has changed between Xcode versions, so strip rather than match.
+UUID = re.compile(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}")
+TRAILING_INDEX = re.compile(r"_\d+$")
+
+
+def readable_name(filename: str) -> str | None:
+    stem = os.path.splitext(filename)[0]
+    stem = TRAILING_INDEX.sub("", UUID.sub("", stem).strip("_- "))
+    return stem or None
 
 
 def main() -> int:
@@ -35,9 +43,9 @@ def main() -> int:
             if not name.lower().endswith(".png"):
                 continue
             path = os.path.join(directory, name)
-            match = NAMED.match(name)
-            if match:
-                target = os.path.join(destination, f"{match.group(1)}.png")
+            readable = readable_name(name)
+            if readable:
+                target = os.path.join(destination, f"{readable}.png")
                 copied += 1
             else:
                 # Unnamed attachment — still worth keeping, just less useful.

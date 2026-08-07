@@ -77,6 +77,15 @@ struct HomeView: View {
         .onChange(of: app.library.changeGeneration) { _, _ in
             Task { await model.loadIfNeeded(app: app) }
         }
+        // The feed is built the moment the view appears, which on a first run is before
+        // there is anything to build it from. Without this it would stay empty until the
+        // calendar day changed.
+        .onChange(of: app.coordinator.hasUsableIndex) { _, usable in
+            if usable { Task { await model.reload(app: app) } }
+        }
+        .onChange(of: app.coordinator.isRunning) { _, running in
+            if !running { Task { await model.reload(app: app) } }
+        }
     }
 
     // MARK: Pieces

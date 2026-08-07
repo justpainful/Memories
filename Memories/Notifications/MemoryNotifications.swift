@@ -17,11 +17,10 @@ enum MemoryNotifications {
 
     // MARK: Permission
 
-    static func requestAuthorizationIfNeeded() async -> Bool {
+    /// Only ever called from the Settings screen, when the user asks for reminders.
+    static func requestAuthorization() async -> Bool {
         let center = UNUserNotificationCenter.current()
-        let settings = await center.notificationSettings()
-
-        switch settings.authorizationStatus {
+        switch await center.notificationSettings().authorizationStatus {
         case .notDetermined:
             return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
         case .authorized, .provisional, .ephemeral:
@@ -29,6 +28,20 @@ enum MemoryNotifications {
         default:
             return false
         }
+    }
+
+    static func isAuthorized() async -> Bool {
+        switch await UNUserNotificationCenter.current().notificationSettings().authorizationStatus {
+        case .authorized, .provisional, .ephemeral: return true
+        default: return false
+        }
+    }
+
+    /// The Settings path: ask, then schedule. Everything else reschedules silently.
+    @MainActor
+    static func enable(app: AppEnvironment) async {
+        _ = await requestAuthorization()
+        await reschedule(app: app)
     }
 
     static func authorizationDescription() async -> String {
@@ -50,7 +63,9 @@ enum MemoryNotifications {
 
         let frequency = app.settings.memoryFrequency
         guard frequency != .off else { return }
-        guard await requestAuthorizationIfNeeded() else { return }
+        // Never prompt from here. Rescheduling happens on every launch and in the
+        // background; a permission dialog appearing out of nowhere is not acceptable.
+        guard await isAuthorized() else { return }
 
         let hour = app.settings.reminderHour
         let calendar = Calendar.current

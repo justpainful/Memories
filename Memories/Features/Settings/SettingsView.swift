@@ -174,7 +174,13 @@ struct MemoryFrequencyView: View {
 
     private func reschedule() {
         Task {
-            await MemoryNotifications.reschedule(app: app)
+            // Choosing a frequency is the moment the user asked for reminders, so this is
+            // the one place allowed to raise the permission dialog.
+            if app.settings.memoryFrequency == .off {
+                MemoryNotifications.cancelAll()
+            } else {
+                await MemoryNotifications.enable(app: app)
+            }
             authorization = await MemoryNotifications.authorizationDescription()
         }
     }

@@ -33,8 +33,10 @@ final class AppSettings {
         includeScreenshots = defaults.object(forKey: "includeScreenshots") as? Bool ?? false
         includeScreenRecordings = defaults.object(forKey: "includeScreenRecordings") as? Bool ?? false
         includeDownloads = defaults.object(forKey: "includeDownloads") as? Bool ?? false
+        // Off by default. Turning it on is what asks for notification permission; prompting
+        // on first launch, before the user has seen a single memory, earns a "Don't Allow".
         memoryFrequency = MemoryFrequency(rawValue: defaults.string(forKey: "memoryFrequency") ?? "")
-            ?? .daily
+            ?? .off
         reminderHour = defaults.object(forKey: "reminderHour") as? Int ?? 9
         autoplayVideos = defaults.object(forKey: "autoplayVideos") as? Bool ?? true
         playLivePhotos = defaults.object(forKey: "playLivePhotos") as? Bool ?? true
