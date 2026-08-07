@@ -19,17 +19,23 @@ struct ExploreTimeBar: View {
     var body: some View {
         GlassEffectContainer(spacing: 22) {
             if isExploring {
+                // The panel sits over dimmed content and holds a list, so it keeps the
+                // regular material: clear glass here would make its rows hard to read.
                 panel
                     .glassEffect(.regular, in: .rect(cornerRadius: 30))
                     .glassEffectID("bar", in: glass)
             } else {
                 HStack(spacing: 18) {
+                    // The bar floats over photography most of the time, and clear glass is
+                    // what lets it actually look like glass — refracting the picture behind
+                    // it and shifting as the device moves — instead of a frosted slab. The
+                    // selection pill and the symbol weights carry legibility instead.
                     tabs
-                        .glassEffect(.regular.interactive(), in: .capsule)
+                        .glassEffect(.clear.interactive(), in: .capsule)
                         .glassEffectID("bar", in: glass)
 
                     exploreButton
-                        .glassEffect(.regular.interactive(), in: .circle)
+                        .glassEffect(.clear.interactive(), in: .circle)
                         .glassEffectID("explore", in: glass)
                 }
             }

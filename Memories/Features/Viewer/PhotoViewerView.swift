@@ -37,7 +37,9 @@ struct PhotoViewerView: View {
 
             TabView(selection: $current) {
                 ForEach(identifiers, id: \.self) { identifier in
-                    ViewerPage(identifier: identifier, isCurrent: identifier == current)
+                    ViewerPage(identifier: identifier,
+                               isCurrent: identifier == current,
+                               showControls: showControls)
                         .tag(identifier)
                 }
             }
@@ -258,6 +260,7 @@ struct PhotoViewerView: View {
 private struct ViewerPage: View {
     let identifier: String
     let isCurrent: Bool
+    let showControls: Bool
 
     @Environment(\.app) private var app
     @State private var livePhoto: PHLivePhoto?
@@ -269,9 +272,9 @@ private struct ViewerPage: View {
             ZStack {
                 Color.black
                 if let player {
-                    VideoPlayer(player: player)
-                        .onAppear { if app.settings.autoplayVideos && isCurrent { player.play() } }
-                        .onDisappear { player.pause() }
+                    MemoryVideoPlayer(player: player,
+                                      showControls: showControls,
+                                      autoplay: app.settings.autoplayVideos && isCurrent)
                 } else if let livePhoto {
                     LivePhotoView(livePhoto: livePhoto, isPlaying: isCurrent && app.settings.playLivePhotos)
                 } else {
