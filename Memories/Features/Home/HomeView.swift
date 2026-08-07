@@ -34,6 +34,10 @@ struct HomeView: View {
                     .padding(.bottom, 132)
                 }
                 .scrollIndicators(.hidden)
+                // Lets the navigation bar's own Liquid Glass meet the feed with a soft
+                // falloff instead of a hard edge, which is what stops a floating bar over
+                // photography from looking like a pasted-on rectangle.
+                .scrollEdgeEffectStyle(.soft, for: .top)
             }
             .navigationTitle("Memories")
             .navigationBarTitleDisplayMode(.large)

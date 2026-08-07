@@ -156,10 +156,13 @@ final class MemoriesUITests: XCTestCase {
         sleep(2)
     }
 
+    /// Photograph the screen, then make sure nothing is left covering it. A sheet that stays
+    /// open swallows every later tap and the rest of the tour photographs the same view.
     private func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+        dismissAnySheet()
     }
 }

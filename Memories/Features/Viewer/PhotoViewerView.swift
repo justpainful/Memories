@@ -57,10 +57,10 @@ struct PhotoViewerView: View {
             if let confirmationText {
                 Text(confirmationText)
                     .font(Typo.control)
-                    .foregroundStyle(Palette.textPrimary)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, Space.l)
                     .padding(.vertical, Space.m)
-                    .glassPanel(cornerRadius: 20)
+                    .glassPanel(cornerRadius: 20, tone: .clear)
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
         }
@@ -103,14 +103,14 @@ struct PhotoViewerView: View {
 
     private var topBar: some View {
         HStack {
-            GlassIconButton(systemImage: "chevron.left", label: "Back") { dismiss() }
+            GlassIconButton(systemImage: "chevron.left", label: "Back", tone: .clear) { dismiss() }
             Spacer()
             if let record { Text(record.creationDate, format: .dateTime.month(.abbreviated).day().year())
                 .font(Typo.meta)
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(.white.opacity(0.9))
                 .padding(.horizontal, Space.m)
                 .padding(.vertical, 7)
-                .glassPanel(cornerRadius: 14)
+                .glassPanel(cornerRadius: 14, tone: .clear)
             }
             Spacer()
             Color.clear.frame(width: 46, height: 46)
@@ -124,7 +124,8 @@ struct PhotoViewerView: View {
             HStack(spacing: 14) {
                 GlassIconButton(systemImage: isLoved ? "heart.fill" : "heart",
                                 label: isLoved ? "Remove from loved" : "Love",
-                                prominent: isLoved) {
+                                prominent: isLoved,
+                                tone: .clear) {
                     toggleLoved()
                 }
 
@@ -147,10 +148,11 @@ struct PhotoViewerView: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Palette.textPrimary)
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
                         .frame(width: 46, height: 46)
                 }
-                .glassControl(.circle)
+                .glassControl(.circle, tone: .clear)
                 .accessibilityLabel("More actions")
             }
         }

@@ -18,21 +18,40 @@ enum GlassShape {
     case circle
 }
 
+/// Which of the two real Liquid Glass materials a control should use.
+///
+/// `regular` is the load-bearing one: it adapts to whatever is behind it and keeps text
+/// legible over unpredictable content, which is what a tab bar sitting over a scrolling
+/// feed needs.
+///
+/// `clear` is far more transparent and does much less to the content behind it, so the
+/// material's actual behaviour — the way it bends light at its edges and shifts as the
+/// device moves — is visible rather than muted. It is meant for controls floating over
+/// media, where the photograph should stay the brightest thing on screen. That is exactly
+/// the viewer, so the viewer uses it; it would be the wrong choice over a white list.
+enum GlassTone {
+    case regular
+    case clear
+}
+
 extension View {
     /// A tappable control: chips, floating buttons, segmented items.
-    func glassControl(_ shape: GlassShape = .capsule, tinted: Bool = false) -> some View {
-        modifier(GlassControlModifier(shape: shape, tinted: tinted))
+    func glassControl(_ shape: GlassShape = .capsule,
+                      tone: GlassTone = .regular,
+                      tinted: Bool = false) -> some View {
+        modifier(GlassControlModifier(shape: shape, tone: tone, tinted: tinted))
     }
 
     /// A transient surface that holds controls — the Explore Time panel, an action cluster.
     /// Not interactive itself; the things inside it are.
-    func glassPanel(cornerRadius: CGFloat = 28) -> some View {
-        self.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+    func glassPanel(cornerRadius: CGFloat = 28, tone: GlassTone = .regular) -> some View {
+        self.glassEffect(tone == .clear ? .clear : .regular, in: .rect(cornerRadius: cornerRadius))
     }
 }
 
 private struct GlassControlModifier: ViewModifier {
     let shape: GlassShape
+    let tone: GlassTone
     let tinted: Bool
 
     func body(content: Content) -> some View {
@@ -47,7 +66,8 @@ private struct GlassControlModifier: ViewModifier {
     }
 
     private var glass: Glass {
-        tinted ? .regular.tint(Palette.accent).interactive() : .regular.interactive()
+        let base: Glass = tone == .clear ? .clear : .regular
+        return tinted ? base.tint(Palette.accent).interactive() : base.interactive()
     }
 }
 
@@ -84,17 +104,21 @@ struct GlassIconButton: View {
     let systemImage: String
     var label: String
     var prominent: Bool = false
+    var tone: GlassTone = .regular
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(prominent ? Color.white : Palette.textPrimary)
+                // Over a photograph the glass is clear, so the symbol carries its own
+                // contrast rather than relying on the material to provide it.
+                .foregroundStyle(prominent || tone == .clear ? Color.white : Palette.textPrimary)
+                .shadow(color: .black.opacity(tone == .clear ? 0.25 : 0), radius: 3, y: 1)
                 .frame(width: 46, height: 46)
         }
         .buttonStyle(.plain)
-        .glassControl(.circle, tinted: prominent)
+        .glassControl(.circle, tone: tone, tinted: prominent)
         .accessibilityLabel(label)
     }
 }

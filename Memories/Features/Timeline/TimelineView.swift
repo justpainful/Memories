@@ -37,6 +37,7 @@ struct TimelineView: View {
                         .padding(.bottom, 132)
                     }
                     .scrollIndicators(.hidden)
+                    .scrollEdgeEffectStyle(.soft, for: .top)
                     .onChange(of: scrollTarget) { _, target in
                         guard let target else { return }
                         withAnimation(.smooth(duration: 0.4)) { proxy.scrollTo(target, anchor: .top) }

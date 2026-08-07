@@ -79,6 +79,11 @@ def save(img: Image.Image, path: str, when: dt.datetime) -> None:
         "GPS": {}, "1st": {}, "thumbnail": None,
     }
     img.save(path, "JPEG", quality=88, exif=piexif.dump(exif))
+    # `simctl addmedia` prefers EXIF DateTimeOriginal but falls back to the file's own
+    # modification time, so set both. Without a date the whole library imports as "now"
+    # and every anniversary memory comes out empty.
+    stamp_seconds = when.timestamp()
+    os.utime(path, (stamp_seconds, stamp_seconds))
 
 
 def main() -> None:
