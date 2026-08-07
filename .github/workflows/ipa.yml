@@ -1,0 +1,107 @@
+name: Unsigned IPA
+
+# The other lanes build for the simulator, which produces an x86_64/arm64 bundle that no
+# iPhone will ever run. This one builds Release against the real device SDK with signing
+# turned off, and packages the result the way an .ipa is actually shaped: a zip with the
+# .app inside a top-level `Payload` folder.
+#
+# The output is deliberately *unsigned*. It cannot be installed on a stock iPhone as-is —
+# it is the input to a signing tool (Sideloadly, AltStore) or to a device that does not
+# require a signature. Signing here would mean putting a real certificate and private key
+# into CI, which this project has no need of.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  ipa:
+    name: Build an unsigned .ipa
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          set -euo pipefail
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n1)
+          [ -n "$latest" ] && sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+
+      - name: Build for device, unsigned
+        run: |
+          set -o pipefail
+          # `build -sdk iphoneos` rather than `archive`: archiving runs a packaging and
+          # validation pass that wants a team and an identity even when told not to sign,
+          # and there is nothing in an archive that this artifact needs.
+          xcodebuild build \
+            -project Memories.xcodeproj \
+            -scheme Memories \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath .build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            2>&1 | tail -n 40
+
+      - name: Check the app is what it claims to be
+        run: |
+          set -euo pipefail
+          app=".build/Build/Products/Release-iphoneos/Memories.app"
+          [ -d "$app" ] || { echo "::error::No Memories.app was produced"; exit 1; }
+
+          # A simulator slice here would mean the build silently fell back to the wrong SDK,
+          # and the mistake would only surface on someone's phone.
+          archs=$(lipo -archs "$app/Memories")
+          echo "architectures: $archs"
+          case "$archs" in *arm64*) ;; *) echo "::error::Not an arm64 device build"; exit 1 ;; esac
+
+          # UILaunchScreen is what keeps the app from running letterboxed into a square with
+          # black bars, which is the exact failure this project was asked to prevent. It is
+          # cheap to assert and expensive to discover on a device.
+          plist="$app/Info.plist"
+          for key in CFBundleIdentifier CFBundleShortVersionString UILaunchScreen NSPhotoLibraryUsageDescription; do
+            /usr/libexec/PlistBuddy -c "Print :$key" "$plist" >/dev/null 2>&1 \
+              || { echo "::error::Info.plist is missing $key"; exit 1; }
+          done
+          echo "bundle: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")"
+          echo "version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+
+          # Say plainly whether anything signed it, rather than leaving it to be discovered.
+          if codesign -dv "$app" 2>/dev/null; then
+            echo "::warning::The app carries a signature; it was expected to be unsigned"
+          else
+            echo "unsigned, as intended"
+          fi
+
+      - name: Package as .ipa
+        id: package
+        run: |
+          set -euo pipefail
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+            .build/Build/Products/Release-iphoneos/Memories.app/Info.plist)
+          name="Memories-${version}-$(git rev-parse --short HEAD)-unsigned.ipa"
+
+          rm -rf Payload && mkdir Payload
+          cp -R .build/Build/Products/Release-iphoneos/Memories.app Payload/
+          # An .ipa is a plain zip whose root is `Payload/`. Nothing else about it is special.
+          zip -qry "$name" Payload
+          rm -rf Payload
+
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          ls -lh "$name"
+          unzip -l "$name" | head -n 12
+
+      - name: Upload the .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa
+          path: ${{ steps.package.outputs.name }}
+          retention-days: 30
+          if-no-files-found: error
