@@ -541,19 +541,11 @@ struct VideoTransport: View {
     }
 }
 
-extension TimeInterval {
-    /// The same span of time as `shortDuration`, said rather than shown.
-    ///
-    /// `0:41` is a clock face. A voice reads it as a time of day, or as two unrelated numbers,
-    /// and in a transport with one of them either side of a scrubber that is exactly the
-    /// confusion to avoid. This is what VoiceOver is handed instead — "41 seconds" — and
-    /// Foundation builds it, so the units and the digits follow the reader's locale rather than
-    /// being assembled out of English.
-    var spokenDuration: String {
-        Duration.seconds(max(0, rounded()))
-            .formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide))
-    }
-}
+// `spokenDuration` — "41 seconds" rather than the clock face "0:41", which a voice reads as a
+// time of day or as two unrelated numbers — lives beside `shortDuration` in
+// `DesignSystem/PhotoImageView.swift`. Both of them are `Double`, both are read by the grid
+// badge, the filmstrip and this transport, and two copies of the same extension on the same
+// type is not an abstraction, it is a redeclaration.
 
 /// An `AVPlayerLayer` with nothing attached to it — no controls, no gestures, no chrome.
 private struct PlayerSurface: UIViewRepresentable {
