@@ -65,7 +65,7 @@ struct HeroMemoryCard: View {
                         .foregroundStyle(.white.opacity(0.72))
 
                     Text(candidate.title)
-                        .font(.system(size: 32, weight: .semibold, design: .serif))
+                        .font(Typo.editorial(32))
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
 

@@ -32,7 +32,13 @@ enum Typo {
     static let overline      = Font.system(size: 12, weight: .semibold)
     static let tabLabel      = Font.system(size: 11, weight: .medium)
 
-    private static func editorial(_ size: CGFloat, _ weight: Font.Weight) -> Font {
+    /// An editorial font at a size the constants above do not cover.
+    ///
+    /// Public because several screens set a one-off headline size. They must come through
+    /// here rather than writing `design: .serif` themselves — a hard-coded serif ignores the
+    /// user's choice, and the result is a Settings switch that changes some of the text on a
+    /// screen and not the rest.
+    static func editorial(_ size: CGFloat, _ weight: Font.Weight = .semibold) -> Font {
         .system(size: size, weight: weight, design: TypographyPreference.shared.style.design)
     }
 }

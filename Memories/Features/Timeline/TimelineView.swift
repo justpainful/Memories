@@ -86,7 +86,7 @@ struct TimelineView: View {
         VStack(alignment: .leading, spacing: Space.l) {
             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                 Text(String(group.year))
-                    .font(.system(size: 30, weight: .semibold, design: .serif))
+                    .font(Typo.editorial(30))
                     .foregroundStyle(Palette.textPrimary)
                 Text("\(group.months.reduce(0) { $0 + $1.count })")
                     .font(Typo.meta)

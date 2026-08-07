@@ -105,7 +105,7 @@ struct ExploreTimeBar: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Explore Time")
-                    .font(.system(size: 17, weight: .semibold, design: .serif))
+                    .font(Typo.editorial(17))
                     .foregroundStyle(Palette.textPrimary)
                 Spacer()
                 Button {

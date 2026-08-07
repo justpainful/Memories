@@ -17,7 +17,7 @@ struct OnboardingView: View {
                 Spacer(minLength: Space.section)
 
                 Text("Your photos.\nRemembered privately.")
-                    .font(.system(size: 36, weight: .semibold, design: .serif))
+                    .font(Typo.editorial(36))
                     .foregroundStyle(Palette.textPrimary)
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)

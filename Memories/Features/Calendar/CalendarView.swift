@@ -65,7 +65,7 @@ struct CalendarView: View {
 
             Spacer()
             Text(anchor, format: .dateTime.month(.wide).year())
-                .font(.system(size: 20, weight: .semibold, design: .serif))
+                .font(Typo.editorial(20))
                 .foregroundStyle(Palette.textPrimary)
             Spacer()
 
