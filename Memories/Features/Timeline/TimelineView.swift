@@ -437,8 +437,15 @@ private struct YearScrubber: View {
     /// produces ASCII: the column ran Western digits down the side of a screen whose headings
     /// were formatted in the reader's own numbering system. The integer length keeps 2005
     /// reading as `05` rather than as `5`.
+    /// The whole year, not the last two digits of it.
+    ///
+    /// Two digits read as a day of the month — a column showing 26, 25, 24, 23 beside headings
+    /// that say 2026 and 2025 is asking the reader to do a conversion, and "09" beside "12" is
+    /// ambiguous in a way a photo library cannot afford. Four digits fit in forty-four points
+    /// at this size with room to spare, and shrink rather than clip when the reader's text is
+    /// larger.
     private func shortYear(_ year: Int) -> String {
-        (year % 100).formatted(.number.grouping(.never).precision(.integerLength(2)))
+        year.formatted(.number.grouping(.never))
     }
 
     private var activeYearDescription: String {

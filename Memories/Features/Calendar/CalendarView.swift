@@ -219,9 +219,22 @@ struct CalendarView: View {
         return Palette.surfaceSunk.opacity(contrast == .increased ? 0.9 : 0.5)
     }
 
+    /// A day number is information before it is a control.
+    ///
+    /// Empty days used to be drawn in `tertiaryLabel`, which over the faint tile beneath them
+    /// is around two to one — a screenshot of a month with no photographs in it shows a grid of
+    /// blank squares with something ghosted inside each. The contrast rules exempt a disabled
+    /// control, but the thing being read here is *which day this is*, and without that the
+    /// month cannot be navigated at all. Apple's own Calendar draws every date in full label
+    /// colour and dims only what belongs to another month.
+    ///
+    /// So the hierarchy stays — a day with photographs is heavier and darker — but the floor
+    /// moves up to `secondaryLabel`, and to full label colour when the reader has asked for
+    /// more contrast.
     private func numberColour(over photograph: Bool, hasPhotos: Bool) -> Color {
         if photograph { return .white }
-        return hasPhotos ? Palette.textPrimary : Palette.textTertiary
+        if hasPhotos { return Palette.textPrimary }
+        return contrast == .increased ? Palette.textPrimary : Palette.textSecondary
     }
 
     // MARK: Data
