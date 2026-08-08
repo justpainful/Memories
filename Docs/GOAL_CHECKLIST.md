@@ -123,6 +123,21 @@ Legend: ✅ done · 🟡 partial · ⬜ not done
 - ✅ Multiple windows on iPad
 - ✅ Right-to-left: directional glyphs mirror, and the scrubbers' x-to-value arithmetic inverts
 
+## How this is verified
+- ✅ `ui-smoke.yml` runs on **iPhone and iPad**, and each runs three passes: the default, the
+  largest accessibility text size, and rotated. Seventeen screens per pass, photographed.
+- ✅ The captures are of the whole screen, turned the right way up. Two traps cost a run each
+  and are written down in the test: the content-size launch argument is
+  `UICTContentSizeCategoryAccessibilityXXXL` and UIKit silently ignores a name it does not
+  recognise; and a phone's display is portrait natively, so a landscape capture arrives on its
+  side unless it is rotated before it is attached.
+- ✅ The feed is photographed **scrolled**, because a bar with nothing behind it is not a test of
+  Liquid Glass, and the two screens that had the glass switched off were shipping that way
+  unseen.
+- ✅ The video player is photographed with a clip open and its transport loaded.
+- ✅ When a test fails, CI prints the reason out of the result bundle. It used to print only the
+  name of the test, with the reason hundreds of lines up the log.
+
 ## Known and not done
 - ⬜ The app is English-only. There is no String Catalog and no second language. Directional
   and formatting correctness under right-to-left is done — mirroring, locale-formatted numbers,
