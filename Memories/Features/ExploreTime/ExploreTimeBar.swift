@@ -149,7 +149,7 @@ struct ExploreTimeBar: View {
 
     private var tabs: some View {
         HStack(spacing: 2) {
-            ForEach(AppTab.allCases) { tab in
+            ForEach(Array(AppTab.allCases.enumerated()), id: \.element) { index, tab in
                 Button {
                     guard selection != tab else { return }
                     selection = tab
@@ -193,7 +193,17 @@ struct ExploreTimeBar: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == tab ? [.isSelected] : [])
+                // The glyph sits *above* the word, so it is read first: without collapsing the
+                // button to one element every tab announced its SF Symbol before its name —
+                // "rectangle stack, Memories". This is the app's primary navigation, and it was
+                // the last control in it still doing that.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(tab.title)
+                // The system's own tab bar says which of how many. SwiftUI publishes no tab
+                // trait to borrow, so the position is said as a hint — the one thing a reader
+                // swiping along a row of three cannot otherwise work out.
+                .accessibilityHint("Tab \(index + 1) of \(AppTab.allCases.count)")
+                .accessibilityAddTraits(selection == tab ? [.isButton, .isSelected] : .isButton)
             }
         }
         .padding(.horizontal, Space.s)
