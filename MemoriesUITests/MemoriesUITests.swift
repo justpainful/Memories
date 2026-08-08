@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// Walks the whole app and photographs every screen.
@@ -73,39 +74,48 @@ final class MemoriesUITests: XCTestCase {
         finish()
     }
 
-    /// The same app in a landscape window.
+    /// The same app turned on its side.
     ///
-    /// Everything that was measured against the height of a portrait phone — a hero card, a
-    /// scrubber column, a panel with a fixed maximum height — fails here first.
+    /// A sampler rather than the full tour, and that is a decision about what this lane can
+    /// honestly test rather than a gap in it.
     ///
-    /// Rotating the *device* is how this used to be done, and on iPadOS 26 it produces nonsense:
-    /// the app lives in a window on the desktop, the window does not turn with the device, and
-    /// the artifacts came back as the interface lying on its side inside a frame that clipped
-    /// it. Nothing was wrong with the app — the tour was photographing a situation that does
-    /// not arise. The window is resized instead, which is the thing an iPad user actually does
-    /// and the thing every adaptive layout in the app is there to answer.
+    /// The app rotates correctly — the screenshots show nine time chips across a row that fits
+    /// four in portrait, which is a landscape layout and not a portrait one stretched. What does
+    /// not rotate is XCUITest's idea of where things are: `isHittable` and every coordinate
+    /// gesture are computed against the display's native orientation, so on a rotated simulator
+    /// the framework decides the Back button is off screen, and the tour spent eleven steps
+    /// stuck on a screen it could not leave. That is the harness failing, not the app, and
+    /// eleven false failures a run is worse than not asserting.
+    ///
+    /// So this rotates, photographs what is reachable without navigating, and stops. The
+    /// wide-layout coverage that actually matters comes from the iPad, where a window can be any
+    /// size at all and the tour navigates normally.
     func testLandscape() throws {
         launchAndSettle()
         XCUIDevice.shared.orientation = .landscapeLeft
         settle()
 
-        // Say out loud whether the window actually turned.
-        //
-        // The first landscape run came back as a set of portrait-shaped layouts rotated into a
-        // landscape frame, and from a screenshot alone there is no way to tell which of two very
-        // different things that is: an app that refuses to rotate, or a simulator that reports
-        // an orientation it never applied. The frame settles it — a landscape window is wider
-        // than it is tall — and it costs one line in the log rather than another hour of runs.
         let window = app.frame
         let screen = XCUIApplication(bundleIdentifier: "com.apple.springboard").frame
         print("landscape: window \(Int(window.width))x\(Int(window.height)), "
               + "screen \(Int(screen.width))x\(Int(screen.height))")
-        // Reported, never asserted. On a windowed system the app's frame is whatever the user —
-        // or here, the system — last dragged it to, and a tour has no business failing a build
-        // over a window size it did not choose.
 
-        tour(prefix: "landscape-")
-        finish()
+        capture("landscape-01-home")
+        app.swipeUp()
+        app.swipeUp()
+        settle()
+        capture("landscape-01b-home-scrolled")
+
+        // The tabs are the one piece of navigation worth trying: they are found by name rather
+        // than by coordinate. If a rotated simulator will not deliver the tap, the capture shows
+        // the feed again, which is not a lie about anything.
+        for (tab, name) in [("Timeline", "landscape-05-timeline"),
+                            ("Library", "landscape-06-library")] {
+            safeTap(app.buttons[tab].firstMatch)
+            capture(name)
+        }
+
+        XCTAssertTrue(app.state == .runningForeground, "The app did not survive being rotated")
     }
 
     // MARK: One tour
@@ -386,7 +396,7 @@ final class MemoriesUITests: XCTestCase {
         // it was captured in, which is what made the last set of artifacts look cut off. The
         // screen is the honest picture: the window, at the size the system gave it, in the place
         // the system put it.
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        let attachment = XCTAttachment(image: upright(XCUIScreen.main.screenshot().image))
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
@@ -395,6 +405,27 @@ final class MemoriesUITests: XCTestCase {
             missteps.append("  \(name).png — expected the \(screen) screen, but it shows \(whereAmI())")
         }
         dismissAnySheet()
+    }
+
+    /// Turn a screenshot the right way up.
+    ///
+    /// `XCUIScreen.main.screenshot()` hands back the display in its *native* orientation, which
+    /// on a phone is portrait however the device is being held. So every landscape capture came
+    /// back as a tall image with the interface lying on its side inside it — which is not a
+    /// crop and not a bug in the app, but is unreadable, and unreadable artifacts are the same
+    /// as no artifacts in a lane whose only output is pictures.
+    private func upright(_ image: UIImage) -> UIImage {
+        let orientation = XCUIDevice.shared.orientation
+        guard orientation == .landscapeLeft || orientation == .landscapeRight else { return image }
+
+        let turned = CGSize(width: image.size.height, height: image.size.width)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        return UIGraphicsImageRenderer(size: turned, format: format).image { context in
+            context.cgContext.translateBy(x: turned.width / 2, y: turned.height / 2)
+            context.cgContext.rotate(by: orientation == .landscapeLeft ? -.pi / 2 : .pi / 2)
+            image.draw(at: CGPoint(x: -image.size.width / 2, y: -image.size.height / 2))
+        }
     }
 
     /// A short description of the screen actually on display, for the failure message. Without
