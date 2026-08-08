@@ -99,11 +99,18 @@ enum Typo {
 
 extension View {
     /// Small uppercase overline used above section headlines.
+    ///
+    /// `secondaryLabel`, not `tertiaryLabel`. Tertiary is around a quarter opacity: below the
+    /// contrast minimum for text of any size, and these are set in caps, kerned, and often laid
+    /// over a photograph's ambient wash — every one of which costs legibility rather than
+    /// buying it. Apple sets a grouped list's section header in secondary and nothing quieter.
+    /// The hierarchy still reads, because the size and the caps are doing that work; the colour
+    /// was only ever doing it a second time, at the reader's expense.
     func overlineStyle() -> some View {
         self.font(Typo.overline)
             .textCase(.uppercase)
             .kerning(0.6)
-            .foregroundStyle(Palette.textTertiary)
+            .foregroundStyle(Palette.textSecondary)
     }
 
     /// A ceiling on how far text inside a piece of fixed chrome is allowed to grow.

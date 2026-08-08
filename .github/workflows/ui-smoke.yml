@@ -102,6 +102,10 @@ jobs:
           fi
           echo "seeded ${#photos[@]} photos and ${#videos[@]} videos"
 
+      # The tail used to be 60 lines, which is fewer than xcodebuild's own epilogue — so every
+      # failure this lane found arrived with its explanation already scrolled off, and finding
+      # out which surface the tour missed meant opening the artifact and guessing. The tour's
+      # failure message is the whole point of it being a test rather than a script.
       - name: Run the UI tour
         run: |
           set -o pipefail
@@ -113,7 +117,7 @@ jobs:
             -derivedDataPath .build \
             -resultBundlePath Result.xcresult \
             CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tail -n 60
+            2>&1 | tail -n 300
 
       - name: Export screenshots
         if: always()

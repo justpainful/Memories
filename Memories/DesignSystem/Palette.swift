@@ -16,12 +16,32 @@ enum Palette {
 
     static let textPrimary   = Color(uiColor: .label)
     static let textSecondary = Color(uiColor: .secondaryLabel)
-    static let textTertiary  = Color(uiColor: .tertiaryLabel)
+
+    /// The quietest tone in the app, and the one that has to give way first.
+    ///
+    /// `tertiaryLabel` is about a quarter opacity. That is the right weight for a chevron or a
+    /// placeholder glyph, and it is below the contrast floor for anything anyone is expected to
+    /// read — which is what it was being used for in twenty places: counts, captions, empty-state
+    /// detail, the day numbers in a calendar month with no photographs in it.
+    ///
+    /// Rather than pick through those call sites one at a time and guess which are decoration,
+    /// the tone itself answers the setting. Increase Contrast is precisely a reader saying the
+    /// quiet end of the scale does not work for them, so under it this becomes `secondaryLabel`
+    /// everywhere at once — including inside the chevrons and glyphs, where a little more
+    /// definition costs nothing.
+    static let textTertiary = Color(uiColor: UIColor { traits in
+        traits.accessibilityContrast == .high ? .secondaryLabel : .tertiaryLabel
+    })
 
     /// The system tint. Selected tabs, links, toggles — the same blue every stock app uses.
     static let accent = Color.accentColor
 
-    static let hairline = Color(uiColor: .separator)
+    /// The same bargain as `textTertiary`. `separator` is a translucent hairline that all but
+    /// disappears over a busy background; `opaqueSeparator` is the one the system substitutes
+    /// when a reader has asked for the structure of a screen to be visible rather than implied.
+    static let hairline = Color(uiColor: UIColor { traits in
+        traits.accessibilityContrast == .high ? .opaqueSeparator : .separator
+    })
 
     /// Scrim over photography so overlaid type stays legible without dimming the image.
     static let photoScrim = Color.black.opacity(0.34)

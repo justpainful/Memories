@@ -90,11 +90,16 @@ final class MemoriesUITests: XCTestCase {
         // different things that is: an app that refuses to rotate, or a simulator that reports
         // an orientation it never applied. The frame settles it — a landscape window is wider
         // than it is tall — and it costs one line in the log rather than another hour of runs.
-        let frame = app.frame
-        let turned = frame.width > frame.height
-        print("landscape: window is \(Int(frame.width))x\(Int(frame.height)) — \(turned ? "rotated" : "STILL PORTRAIT")")
+        let window = app.frame
+        let screen = XCUIApplication(bundleIdentifier: "com.apple.springboard").frame
+        let turned = window.width > window.height
+        let report = "window \(Int(window.width))x\(Int(window.height)), screen \(Int(screen.width))x\(Int(screen.height))"
+        print("landscape: \(report) — \(turned ? "rotated" : "STILL PORTRAIT")")
         if !turned {
-            missteps.append("  the window never rotated: it is still \(Int(frame.width))x\(Int(frame.height))")
+            // Both numbers, because they separate the two explanations. A portrait window on a
+            // portrait screen means the simulator never turned and the app is blameless; a
+            // portrait window on a landscape screen means the app refused to follow it.
+            missteps.append("  the window never rotated: \(report)")
         }
 
         tour(prefix: "landscape-")

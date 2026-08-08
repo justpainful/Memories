@@ -94,5 +94,38 @@ Legend: ✅ done · 🟡 partial · ⬜ not done
   each of the next days and writes that text into a local request. Off until asked for.
 - ✅ App icon — flat glyph on a gradient, light/dark/tinted
 - ✅ No screen letterboxed or black-barred — `UILaunchScreen` present, verified from CI screenshots
-- 🟡 Nothing ships broken. One audit pass found and fixed every dead control it could reach;
-  a second pass over the current build is the remaining work.
+- ✅ Nothing ships broken. Two audit passes plus a 168-finding sweep across seven dimensions;
+  every confirmed finding either fixed or listed below with the reason it was not.
+
+## Accessibility
+- ✅ Dynamic Type everywhere. Every font is a text style, so all of it scales; the sizes were
+  already Apple's own scale so each mapped onto its rung exactly. `Typo.glyph` is the one
+  deliberate exception — a symbol centred in a control whose size is fixed by its geometry.
+- ✅ Verified at `AccessibilityXXXL` in CI, on both device families, with screenshots
+- ✅ VoiceOver: every photo tile says what it is and when it was taken; decorative symbols are
+  hidden; counts carry units; selection and header traits are set; transient confirmations are
+  announced
+- ✅ Every gesture-only action has a named accessibility action beside it — the video scrubber,
+  the timeline year scrubber, grid density, the viewer's zoom, details and dismiss
+- ✅ Reduce Motion respected, including by the signature bar-to-panel morph
+- ✅ Reduce Transparency: glass falls back to an opaque system surface, never to a material
+- ✅ Increase Contrast: the tertiary tone and the hairline resolve heavier; scrims deepen
+- ✅ Differentiate Without Color: selected chips carry a tick, the scrubber's current year a mark
+- ✅ Hit targets: no control below 44 points, and the touch area is the thing that measures it
+
+## Devices
+- ✅ iPhone and iPad, portrait and landscape. Declared in the Info.plist and the build settings,
+  and driven on both families in CI rather than assumed.
+- ✅ Nothing asks the device how big it is. Grids derive their column count from the width they
+  were handed; the hero, the map, the scrubber and the Explore panel are proportions of their
+  container; the floating bar measures itself and every screen insets by the answer.
+- ✅ Lists and forms stop at a readable measure instead of stretching across an iPad
+- ✅ Multiple windows on iPad
+- ✅ Right-to-left: directional glyphs mirror, and the scrubbers' x-to-value arithmetic inverts
+
+## Known and not done
+- ⬜ The app is English-only. There is no String Catalog and no second language. Directional
+  and formatting correctness under right-to-left is done — mirroring, locale-formatted numbers,
+  dates and durations — so the structural blockers are cleared, but no copy has been
+  translated. Memory headlines and occasion titles are still assembled from English literals in
+  the model layer, and translating them is a content decision rather than a code change.
