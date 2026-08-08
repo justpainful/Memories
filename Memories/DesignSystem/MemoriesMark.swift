@@ -30,7 +30,9 @@ struct MemoriesMark: View {
             frontPrint.offset(x: offset, y: offset)
         }
         .frame(width: side, height: side)
-        .foregroundStyle(Color.primary)
+        // No colour of its own. The mark takes the foreground style it is given, so the one
+        // place it is used can decide — and so it is never the reason a screen has a colour the
+        // system did not choose.
         .accessibilityHidden(true)
     }
 
@@ -94,11 +96,29 @@ extension View {
     /// announces on arrival, and what the UI tour identifies a screen by; only the drawn text is
     /// replaced. Inline rather than large, because a large-title area holding a logo is a
     /// large-title area with a hole in it.
+    /// The mark sits on its own glass, and that is not decoration.
+    ///
+    /// The first version put a bare `label`-coloured mark in the principal slot and it vanished:
+    /// at the top of the feed the bar has nothing behind it but the hero photograph, and a black
+    /// glyph on a dark blue picture is not a logo, it is nothing. Its two neighbours — the gear
+    /// and the ••• — do not have that problem because iOS gives a toolbar button its own piece
+    /// of glass to stand on, and the mark needs the same thing for the same reason.
+    ///
+    /// `.regular` rather than `.clear`, for the reason the tab bar uses regular: what is behind
+    /// it is a photograph that can be any colour, and adapting to unpredictable content is
+    /// precisely what the regular material is for.
     func markedNavigationBar(_ title: String) -> some View {
         navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { MemoriesMark() }
+                ToolbarItem(placement: .principal) {
+                    MemoriesMark(side: 24)
+                        .foregroundStyle(Palette.textPrimary)
+                        .padding(.horizontal, Space.m)
+                        .padding(.vertical, 6)
+                        .glassControl(.capsule)
+                        .accessibilityHidden(true)
+                }
             }
     }
 }
