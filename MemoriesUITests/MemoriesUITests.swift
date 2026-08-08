@@ -196,6 +196,26 @@ final class MemoriesUITests: XCTestCase {
             safeTap(app.buttons["Library"].firstMatch)
         }
 
+        // The video player, which is the one surface in this app that has never been
+        // photographed.
+        //
+        // `04-viewer` opens whatever the memory happened to start with, and in this fixture that
+        // is always a still — so every change made to playback, the transport, the scrubber and
+        // the stall indicator has been shipped on the strength of reading the code. The seed
+        // library carries five clips precisely so that this is possible; nothing had gone and
+        // opened one. Videos is a filter in the Library, so a clip is two taps away.
+        openRow("Videos")
+        capture("\(prefix)16-videos", expecting: "Videos")
+        if safeTap(app.buttons["asset.tile"].firstMatch) {
+            // Long enough for the player item to load and the transport to read a duration off
+            // it. A capture taken before that photographs a poster frame and a dead scrubber,
+            // which is the state this work existed to get rid of.
+            sleep(4)
+            capture("\(prefix)17-video-player")
+        }
+        returnToRoot()
+        safeTap(app.buttons["Library"].firstMatch)
+
         openRow("Settings")
         capture("\(prefix)13-settings", expecting: "Settings")
         openRow("Local Processing")
