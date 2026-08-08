@@ -91,8 +91,7 @@ struct TimelineView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                 if abs(height - availableHeight) > 0.5 { availableHeight = height }
             }
-            .navigationTitle("Timeline")
-            .navigationBarTitleDisplayMode(.large)
+            .markedNavigationBar("Timeline")
             .toolbar(.hidden, for: .tabBar)   // the app draws its own; see RootView.surface
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

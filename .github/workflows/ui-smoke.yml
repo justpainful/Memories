@@ -119,6 +119,20 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tail -n 300
 
+      # xcodebuild's own epilogue names the test that failed and not the reason, and the reason
+      # was printed hundreds of lines earlier — so every red run in this lane has had to be
+      # diagnosed by opening the artifact and guessing. The result bundle still has it.
+      #
+      # One line of Python rather than a heredoc: a heredoc inside a YAML block scalar has its
+      # terminator indented, which bash does not accept, and the failure of *that* is a step
+      # that reports nothing while looking like it works.
+      - name: Report why a test failed
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results summary --path Result.xcresult --format json > summary.json 2>/dev/null || { echo "no result bundle"; exit 0; }
+          python3 -c "import json; d=json.load(open('summary.json')); fs=d.get('testFailures') or []; print('No test failures recorded.') if not fs else [print('::error::%s -- %s' % (f.get('testName','?'), f.get('failureText',''))) for f in fs]"
+
+
       - name: Export screenshots
         if: always()
         run: |

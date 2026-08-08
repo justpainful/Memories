@@ -54,23 +54,19 @@
 	</array>
 
 	<!--
-	  One scene, deliberately.
+	  More than one window of this app at a time, which is what an iPad user expects of anything
+	  they browse in: a year open beside a place, a memory open beside the library it came from.
+	  Everything shared lives on `MemoriesApp`, which is one instance however many windows there
+	  are, so the second window reads the same store as the first.
 
-	  This was flipped to `true` to get more than one window of the app open on an iPad at once,
-	  and the landscape screenshots that came back were a portrait-sized window sitting in the
-	  corner of a landscape screen with black beside it — on both device families. Multiple
-	  scenes is the one variable that changed, and a scene that is not full-screen is exactly
-	  what that picture is.
-
-	  It is also not what the app was asked for. Split View and Slide Over — being on screen
-	  beside *another* app, which is what iPad multitasking means to most people — work without
-	  it; multiple scenes buys only a second window of Memories beside the first. A second
-	  window is not worth an app that will not turn on its side.
+	  This was turned off for one run to see whether it explained the landscape window coming
+	  back square with black beside it. It did not — the picture was identical without it — so
+	  it is back, and the letterboxing is being chased somewhere else.
 	-->
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
+		<true/>
 	</dict>
 
 	<!--

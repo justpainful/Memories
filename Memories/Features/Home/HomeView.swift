@@ -68,8 +68,7 @@ struct HomeView: View {
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 containerSize = size
             }
-            .navigationTitle("Memories")
-            .navigationBarTitleDisplayMode(.large)
+            .markedNavigationBar("Memories")
             // The app draws its own bar; this one would sit underneath it. The modifier has to
             // be inside the navigation stack to be heard, not wrapped around the tab.
             .toolbar(.hidden, for: .tabBar)

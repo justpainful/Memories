@@ -67,8 +67,7 @@ struct LibraryView: View {
             // is still the page; only the rows stop.
             .readableMeasure()
             .background(Palette.canvas)
-            .navigationTitle("Library")
-            .navigationBarTitleDisplayMode(.large)
+            .markedNavigationBar("Library")
             .toolbar(.hidden, for: .tabBar)   // the app draws its own; see RootView.surface
         }
         .task { load() }
