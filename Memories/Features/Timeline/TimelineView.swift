@@ -56,7 +56,9 @@ struct TimelineView: View {
                         .padding(.bottom, bottomBarInset)
                     }
                     .scrollIndicators(.hidden)
-                    .scrollEdgeEffectStyle(.soft, for: .top)
+                    // The soft scroll-edge style is gone from here for the same reason it is
+                    // gone from the feed: it is not a softer glass, it is no glass. See the
+                    // note in `HomeView`.
                     .onChange(of: scrollTarget) { _, target in
                         guard let target else { return }
                         // One scrubber step can be a decade, and a decade of photographs

@@ -82,6 +82,21 @@ final class MemoriesUITests: XCTestCase {
         launchAndSettle()
         XCUIDevice.shared.orientation = .landscapeLeft
         settle()
+
+        // Say out loud whether the window actually turned.
+        //
+        // The first landscape run came back as a set of portrait-shaped layouts rotated into a
+        // landscape frame, and from a screenshot alone there is no way to tell which of two very
+        // different things that is: an app that refuses to rotate, or a simulator that reports
+        // an orientation it never applied. The frame settles it — a landscape window is wider
+        // than it is tall — and it costs one line in the log rather than another hour of runs.
+        let frame = app.frame
+        let turned = frame.width > frame.height
+        print("landscape: window is \(Int(frame.width))x\(Int(frame.height)) — \(turned ? "rotated" : "STILL PORTRAIT")")
+        if !turned {
+            missteps.append("  the window never rotated: it is still \(Int(frame.width))x\(Int(frame.height))")
+        }
+
         tour(prefix: "landscape-")
         finish()
     }
@@ -110,6 +125,22 @@ final class MemoriesUITests: XCTestCase {
 
     private func tour(prefix: String) {
         capture("\(prefix)01-home", expecting: "Memories")
+
+        // The same screen with the feed pushed up under the navigation bar.
+        //
+        // Every capture in this tour has always been taken at the top of its scroll view, where
+        // a bar has nothing behind it and looks like a plain strip of background. The one thing
+        // a Liquid Glass bar is *for* — refracting the photograph travelling underneath it —
+        // has therefore never appeared in a single artifact, which is how the feed and the
+        // Timeline came to be shipping with the glass edge effect switched off without anybody
+        // seeing it.
+        app.swipeUp()
+        app.swipeUp()
+        settle()
+        capture("\(prefix)01b-home-scrolled")
+        app.swipeDown()
+        app.swipeDown()
+        settle()
 
         safeTap(app.buttons["Explore time"])
         capture("\(prefix)02-explore-time")
@@ -191,16 +222,44 @@ final class MemoriesUITests: XCTestCase {
     /// was exactly that, on both device families.
     private func openRow(_ label: String) {
         let target = app.buttons[label].firstMatch
-        if target.waitForExistence(timeout: 6), !target.isHittable {
-            let scroll = app.scrollViews.firstMatch
-            for _ in 0..<6 where !target.isHittable {
-                if scroll.exists { scroll.swipeUp() } else { app.swipeUp() }
-            }
-        }
+        scrollIntoView(target, fallback: app.staticTexts[label].firstMatch)
         if !safeTap(target, fallback: app.staticTexts[label].firstMatch) {
             safeTap(app.cells.containing(.staticText, identifier: label).firstMatch)
         }
         settle()
+    }
+
+    /// Bring an element within reach, wherever it is in the list.
+    ///
+    /// At the largest accessibility text size the Library is three screens tall, so every row
+    /// from People downwards is simply not on screen — and a tap on something that is not on
+    /// screen does nothing, which the tour reported as the app failing to open seven surfaces
+    /// in a row. Nothing was wrong with the app; the tour had never had to scroll before,
+    /// because until this lane actually applied a large text size there was nothing to scroll to.
+    ///
+    /// It swipes the whole window rather than a scroll view found by index. These screens hold
+    /// more than one scroll view — a row of chips, a filmstrip, a map — and `scrollViews.first`
+    /// is whichever one the accessibility tree happens to list first, which on more than one
+    /// screen is a horizontal one that does not move vertically at all.
+    ///
+    /// It also gives up going down and tries going back up, because a list short enough to have
+    /// been overshot is a list the target is now above.
+    private func scrollIntoView(_ element: XCUIElement, fallback: XCUIElement? = nil) {
+        func reachable() -> Bool {
+            if element.exists, element.isHittable { return true }
+            if let fallback, fallback.exists, fallback.isHittable { return true }
+            return false
+        }
+
+        guard !reachable() else { return }
+        for _ in 0..<8 {
+            app.swipeUp()
+            if reachable() { return }
+        }
+        for _ in 0..<10 {
+            app.swipeDown()
+            if reachable() { return }
+        }
     }
 
     // MARK: Getting back

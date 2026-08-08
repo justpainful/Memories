@@ -49,10 +49,19 @@ struct HomeView: View {
                     .padding(.bottom, bottomBarInset)
                 }
                 .scrollIndicators(.hidden)
-                // Lets the navigation bar's own Liquid Glass meet the feed with a soft
-                // falloff instead of a hard edge, which is what stops a floating bar over
-                // photography from looking like a pasted-on rectangle.
-                .scrollEdgeEffectStyle(.soft, for: .top)
+                // No `.scrollEdgeEffectStyle(.soft)` here, and that is the point.
+                //
+                // The comment that used to sit on this line claimed `.soft` let the navigation
+                // bar's Liquid Glass "meet the feed with a soft falloff". It does not modify the
+                // glass; it *replaces* it. `.soft` is the styleless variant — a plain gradient
+                // fade where the content passes under the bar, with none of the material's
+                // refraction, none of its specular edge and none of the way it picks up the
+                // colour of the photograph travelling beneath it. On the two screens that
+                // carried it — this one and the Timeline — the app's most visible bar had no
+                // real glass on it at all, which is exactly what it was accused of.
+                //
+                // The default is the real thing, and the real thing is what a bar floating over
+                // photography is for.
             }
             // Read here rather than with a `GeometryReader`, which would take all the space in
             // both directions and collapse the scroll view's content height to nothing.
