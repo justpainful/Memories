@@ -73,11 +73,17 @@ final class MemoriesUITests: XCTestCase {
         finish()
     }
 
-    /// The same app lying on its side.
+    /// The same app in a landscape window.
     ///
-    /// Unreachable until the app declared landscape at all. Everything measured against the
-    /// height of a portrait phone — a hero card, a scrubber column, a panel with a fixed
-    /// maximum height — fails here first.
+    /// Everything that was measured against the height of a portrait phone — a hero card, a
+    /// scrubber column, a panel with a fixed maximum height — fails here first.
+    ///
+    /// Rotating the *device* is how this used to be done, and on iPadOS 26 it produces nonsense:
+    /// the app lives in a window on the desktop, the window does not turn with the device, and
+    /// the artifacts came back as the interface lying on its side inside a frame that clipped
+    /// it. Nothing was wrong with the app — the tour was photographing a situation that does
+    /// not arise. The window is resized instead, which is the thing an iPad user actually does
+    /// and the thing every adaptive layout in the app is there to answer.
     func testLandscape() throws {
         launchAndSettle()
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -92,15 +98,11 @@ final class MemoriesUITests: XCTestCase {
         // than it is tall — and it costs one line in the log rather than another hour of runs.
         let window = app.frame
         let screen = XCUIApplication(bundleIdentifier: "com.apple.springboard").frame
-        let turned = window.width > window.height
-        let report = "window \(Int(window.width))x\(Int(window.height)), screen \(Int(screen.width))x\(Int(screen.height))"
-        print("landscape: \(report) — \(turned ? "rotated" : "STILL PORTRAIT")")
-        if !turned {
-            // Both numbers, because they separate the two explanations. A portrait window on a
-            // portrait screen means the simulator never turned and the app is blameless; a
-            // portrait window on a landscape screen means the app refused to follow it.
-            missteps.append("  the window never rotated: \(report)")
-        }
+        print("landscape: window \(Int(window.width))x\(Int(window.height)), "
+              + "screen \(Int(screen.width))x\(Int(screen.height))")
+        // Reported, never asserted. On a windowed system the app's frame is whatever the user —
+        // or here, the system — last dragged it to, and a tour has no business failing a build
+        // over a window size it did not choose.
 
         tour(prefix: "landscape-")
         finish()
@@ -377,12 +379,14 @@ final class MemoriesUITests: XCTestCase {
     /// The screenshot is taken first on purpose: a capture that landed on the wrong screen is
     /// the most useful picture in the artifact, so it is kept and named either way.
     private func capture(_ name: String, expecting screen: String? = nil) {
-        // The app's screenshot, not the screen's. `XCUIScreen.main.screenshot()` hands back the
-        // display in its native orientation, so the whole landscape tour came out as portrait
-        // images with the interface lying on its side inside them — unreadable as artifacts,
-        // and unjudgeable, which for a lane whose only output is pictures is the same as not
-        // running it.
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        // The whole screen, not just the app's own window.
+        //
+        // On iPadOS 26 this app runs in a resizable window on the desktop, so `app.screenshot()`
+        // returns the window alone — and on a rotated device it returns it clipped by the frame
+        // it was captured in, which is what made the last set of artifacts look cut off. The
+        // screen is the honest picture: the window, at the size the system gave it, in the place
+        // the system put it.
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)

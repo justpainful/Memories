@@ -54,14 +54,13 @@
 	</array>
 
 	<!--
-	  More than one window of this app at a time, which is what an iPad user expects of anything
-	  they browse in: a year open beside a place, a memory open beside the library it came from.
-	  Everything shared lives on `MemoriesApp`, which is one instance however many windows there
-	  are, so the second window reads the same store as the first.
+	  More than one window of this app at a time, and with it the whole of iPadOS 26's windowing:
+	  the app runs in a resizable window on the desktop, with traffic lights, beside anything
+	  else. That is the modern iPad, and it is the thing that makes every adaptive layout in this
+	  app worth having — a window can be any size at all, not one of three multitasking widths.
 
-	  This was turned off for one run to see whether it explained the landscape window coming
-	  back square with black beside it. It did not — the picture was identical without it — so
-	  it is back, and the letterboxing is being chased somewhere else.
+	  Everything shared lives on `MemoriesApp`, which is one instance however many windows there
+	  are, so a second window reads the same store as the first rather than starting its own.
 	-->
 	<key>UIApplicationSceneManifest</key>
 	<dict>
