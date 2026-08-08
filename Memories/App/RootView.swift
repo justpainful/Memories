@@ -16,7 +16,11 @@ enum AppTab: String, Hashable, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .memories: return "rectangle.stack"
-        case .timeline: return "calendar.day.timeline.left"
+        // `.leading`, not `.left`. SF Symbols publishes both, and the difference is the whole
+        // point of the pair: `.left` draws the day column on the left whatever the layout
+        // direction, so in a right-to-left layout the tab bar's one directional glyph points
+        // back the way the reader came from. `.leading` mirrors with the interface.
+        case .timeline: return "calendar.day.timeline.leading"
         case .library:  return "square.grid.2x2"
         }
     }

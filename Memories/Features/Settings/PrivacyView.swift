@@ -18,7 +18,7 @@ struct PrivacyView: View {
             // numbering system, beside dates on the same screen that are localized properly.
             Section("Photos") {
                 LabeledContent("Access", value: app.library.access.title)
-                LabeledContent("Read on this iPhone", value: processed.formatted(.number))
+                LabeledContent("Read on \(DeviceName.thisDevice)", value: processed.formatted(.number))
                 LabeledContent("Examined for detail", value: withFeatures.formatted(.number))
             }
 
@@ -35,7 +35,7 @@ struct PrivacyView: View {
             } header: {
                 Text("Leaving this device")
             } footer: {
-                Text("Memories has no backend and no sign-in. Photographs are examined here, on this iPhone, and what is worked out about them stays here too.")
+                Text("Memories has no backend and no sign-in. Photographs are examined here, on \(DeviceName.thisDevice), and what is worked out about them stays here too.")
             }
 
             Section {
@@ -45,7 +45,13 @@ struct PrivacyView: View {
             } header: {
                 Text("The one exception")
             } footer: {
-                Text("When you open a photo’s details and it has coordinates saved by your camera, those coordinates are sent to Apple’s geocoding service to turn them into a place name. The photo itself is never sent. Everything else happens offline.")
+                // This paragraph had to change when place naming moved out of the details panel
+                // and into indexing. It used to say the lookup happened when you opened a
+                // photo's details, which was true then and became false the moment the app
+                // started naming every located occasion on its own. A privacy page that
+                // describes an older version of the app is worse than no privacy page: it is
+                // the one screen a reader is entitled to take literally.
+                Text("Coordinates your camera saved are sent to Apple’s geocoding service to be turned into a place name — while your library is being read through, and when you open the details of a photo that has not been named yet. Coordinates only: no photograph, and nothing that identifies you or this device. Everything else happens offline.")
             }
 
             Section {

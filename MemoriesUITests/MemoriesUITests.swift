@@ -57,9 +57,16 @@ final class MemoriesUITests: XCTestCase {
     /// itself, and a button gets pushed off the bottom of a screen that cannot scroll. None of
     /// it is visible at the default size, which is why none of it was found.
     func testLargestTextSize() throws {
+        // `UICTContentSizeCategoryAccessibilityXXXL`, and the exact spelling is the whole thing.
+        // The first version of this passed `…AccessibilityExtraExtraExtraLarge`, which is the
+        // Swift enum case's name and not the string UIKit reads. UIKit does not complain about a
+        // category it does not recognise; it silently keeps the default. So the run went green,
+        // fifteen screenshots came back named `ax-`, and every one of them was the app at the
+        // ordinary text size — a whole verification lane reporting on a configuration it had
+        // never actually been in.
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName",
-            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+            "UICTContentSizeCategoryAccessibilityXXXL",
         ]
         launchAndSettle()
         tour(prefix: "ax-")
@@ -113,7 +120,12 @@ final class MemoriesUITests: XCTestCase {
         safeTap(app.buttons["memory.card"].firstMatch)
         capture("\(prefix)03-memory")
 
-        safeTap(app.scrollViews.buttons.element(boundBy: 2))
+        // A photograph asked for by name. This used to be `buttons.element(boundBy: 2)` — the
+        // third button on the screen, whatever that turned out to be — which is exactly the
+        // kind of blind index that once sent the tour into Settings for nine straight steps.
+        if !safeTap(app.buttons["asset.tile"].firstMatch) {
+            safeTap(app.scrollViews.buttons.element(boundBy: 2))
+        }
         capture("\(prefix)04-viewer")
 
         returnToRoot()
@@ -170,8 +182,22 @@ final class MemoriesUITests: XCTestCase {
         settle()
     }
 
+    /// Open a row by name, scrolling to it first.
+    ///
+    /// The scroll is not optional. At the largest text size every list in the app is two or
+    /// three screens long, so a row that sat comfortably above the fold at the default size is
+    /// simply not on screen — and a tap on something that is not on screen does nothing, which
+    /// the tour then reported as the app failing to open a screen. `Settings › Local Processing`
+    /// was exactly that, on both device families.
     private func openRow(_ label: String) {
-        if !safeTap(app.buttons[label].firstMatch, fallback: app.staticTexts[label].firstMatch) {
+        let target = app.buttons[label].firstMatch
+        if target.waitForExistence(timeout: 6), !target.isHittable {
+            let scroll = app.scrollViews.firstMatch
+            for _ in 0..<6 where !target.isHittable {
+                if scroll.exists { scroll.swipeUp() } else { app.swipeUp() }
+            }
+        }
+        if !safeTap(target, fallback: app.staticTexts[label].firstMatch) {
             safeTap(app.cells.containing(.staticText, identifier: label).firstMatch)
         }
         settle()
@@ -287,7 +313,12 @@ final class MemoriesUITests: XCTestCase {
     /// The screenshot is taken first on purpose: a capture that landed on the wrong screen is
     /// the most useful picture in the artifact, so it is kept and named either way.
     private func capture(_ name: String, expecting screen: String? = nil) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        // The app's screenshot, not the screen's. `XCUIScreen.main.screenshot()` hands back the
+        // display in its native orientation, so the whole landscape tour came out as portrait
+        // images with the interface lying on its side inside them — unreadable as artifacts,
+        // and unjudgeable, which for a lane whose only output is pictures is the same as not
+        // running it.
+        let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)

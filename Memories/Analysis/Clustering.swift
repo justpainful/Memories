@@ -162,10 +162,23 @@ enum EventClustering {
     }
 
     /// Titles an occasion from when it happened, in the app's editorial voice.
+    ///
+    /// The weekday is asked for in the app's own language rather than the device's, and that is
+    /// deliberate. The words around it — "morning", "evening" — are English literals, and
+    /// `.formatted(.dateTime.weekday(.wide))` follows whatever language the phone is set to. On
+    /// an Arabic device that produced "الاثنين morning": half a sentence in each of two
+    /// languages, written into the database and shown for as long as the occasion exists.
+    ///
+    /// One language is the correct answer until the app has a second one. When it does, this
+    /// whole function becomes a `LocalizedStringResource` per time of day with the weekday as
+    /// an argument, and this override comes out with it — a template that puts the weekday
+    /// after the time of day, or drops it, is a translation decision and not something to
+    /// approximate here.
     static func title(for group: [ClusterInput]) -> String {
         guard let start = group.first?.date else { return "An occasion" }
         let hour = Calendar.current.component(.hour, from: start)
-        let weekday = start.formatted(.dateTime.weekday(.wide))
+        let weekday = start.formatted(Date.FormatStyle(locale: Locale(identifier: "en_US_POSIX"))
+            .weekday(.wide))
 
         switch hour {
         case 0..<5:   return "A late night"

@@ -201,10 +201,17 @@ struct HomeView: View {
         } else if app.library.access == .limited {
             QuietStatusView(
                 title: "Only a few photos are shared with Memories",
-                detail: "Choose more photos in Settings to give the app more to work with.",
+                detail: "Choose more photos to give the app more to work with.",
                 symbol: "photo.on.rectangle",
-                actionTitle: "Open Settings",
-                action: { openSystemSettings() }
+                // Apple hands us this sheet for exactly this moment, and the app was sending
+                // people out to the Settings app instead — out of Memories, into a tree of
+                // system screens, to find a list of photographs and come back. The picker is
+                // one tap and never leaves. Settings stays as the fallback for the case where
+                // there is no window to present from at all.
+                actionTitle: "Select More Photos…",
+                action: {
+                    if !app.library.presentLimitedLibraryPicker() { openSystemSettings() }
+                }
             )
         } else {
             QuietStatusView(

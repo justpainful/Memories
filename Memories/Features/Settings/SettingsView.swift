@@ -54,6 +54,16 @@ struct SettingsView: View {
 
             Section {
                 LabeledContent("Photo Access", value: app.library.access.title)
+                // Two different rows, because there are two different fixes. Choosing which
+                // photographs are shared is a sheet Apple presents inside the app; changing the
+                // level of access at all is a trip to Settings. Offering only the second for
+                // both was sending someone who wanted to add a few photographs on a walk
+                // through the system's own screens to do it.
+                if app.library.access == .limited {
+                    Button("Select More Photos…") {
+                        if !app.library.presentLimitedLibraryPicker() { openSystemSettings() }
+                    }
+                }
                 if app.library.access != .full {
                     Button("Change in Settings") { openSystemSettings() }
                 }
@@ -72,7 +82,7 @@ struct SettingsView: View {
                 // Formatted rather than interpolated raw: a bare `\(count)` prints digits with
                 // no grouping separator and in no particular numbering system, next to dates on
                 // the same screen that are localized properly.
-                Text("\(app.coordinator.indexedCount.formatted(.number)) items indexed on this iPhone.")
+                Text("\(app.coordinator.indexedCount.formatted(.number)) items indexed on \(DeviceName.thisDevice).")
             }
 
             Section("Playback") {
@@ -115,7 +125,7 @@ struct SettingsView: View {
             } header: {
                 Text("Appearance")
             } footer: {
-                Text("System sets every word in SF Pro, the iPhone’s own typeface. Editorial sets memory titles, section headings and the date above the feed in New York, a serif; buttons, counts and settings stay in SF Pro either way.")
+                Text("System sets every word in SF Pro, the system’s own typeface. Editorial sets memory titles, section headings and the date above the feed in New York, a serif; buttons, counts and settings stay in SF Pro either way.")
             }
 
             Section {
@@ -182,7 +192,7 @@ struct MemoryFrequencyView: View {
                 .pickerStyle(.inline)
                 .labelsHidden()
             } footer: {
-                Text("Memories are chosen on this iPhone and scheduled locally. There is no server, no push service and no account involved.")
+                Text("Memories are chosen on \(DeviceName.thisDevice) and scheduled locally. There is no server, no push service and no account involved.")
             }
 
             if app.settings.memoryFrequency != .off {

@@ -140,9 +140,9 @@ enum DeviceConditions {
     static func explanation(for allowance: WorkAllowance) -> String? {
         switch allowance {
         case .full:           return nil
-        case .reduced:        return "Working gently while you use your iPhone · faster on charge"
+        case .reduced:        return "Working gently while you use your \(DeviceName.current) · faster on charge"
         case .metadataOnly:   return "Paused heavy analysis to save power"
-        case .suspended:      return "Paused while your iPhone cools down"
+        case .suspended:      return "Paused while your \(DeviceName.current) cools down"
         }
     }
 }

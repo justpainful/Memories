@@ -107,7 +107,7 @@ struct AssetDetailsView: View {
                 Text("""
                      Your library dates this \
                      \(record.creationDate.formatted(date: .abbreviated, time: .omitted)) — the day it \
-                     was saved to this iPhone. The date above came from the file itself.
+                     was saved to \(DeviceName.thisDevice). The date above came from the file itself.
                      """)
             }
         }
@@ -283,17 +283,17 @@ struct AssetDetailsView: View {
     /// otherwise two rows below a live lookup is a panel the user is right not to believe.
     private func privacySection(_ record: AssetRecord) -> some View {
         Section {
-            row("Stored on this iPhone", record.isLocallyAvailable ? "Yes" : "In iCloud only")
+            row("Stored on \(DeviceName.thisDevice)", record.isLocallyAvailable ? "Yes" : "In iCloud only")
             row("Uploaded by Memories", "Never")
         } footer: {
             if record.hasLocation {
                 Text("""
-                     Memories analyzes photos on this device. No photo leaves your iPhone. \
+                     Memories analyzes photos on this device. No photo leaves your \(DeviceName.current). \
                      Naming the place above sends its coordinate — and only its coordinate — \
                      to Apple’s geocoder.
                      """)
             } else {
-                Text("Memories analyzes photos on this device. Nothing about this photo has left your iPhone.")
+                Text("Memories analyzes photos on this device. Nothing about this photo has left your \(DeviceName.current).")
             }
         }
     }

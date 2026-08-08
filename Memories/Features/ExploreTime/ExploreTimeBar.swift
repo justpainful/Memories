@@ -64,6 +64,11 @@ struct ExploreTimeBar: View {
                 // The panel sits over dimmed content and holds a list, so it keeps the
                 // regular material: clear glass here would make its rows hard to read.
                 surface(panel, shape: .rounded(Radius.hero), interactive: false)
+                    // The panel covers the app and dims everything under it, so it has to say
+                    // so. Without `.isModal`, VoiceOver goes on swiping into the feed behind
+                    // it — a reader ends up somewhere they cannot see is still there, with no
+                    // sense that anything is open or how to close it.
+                    .accessibilityAddTraits(.isModal)
                     // Under Reduce Motion the two states stop being one travelling piece of
                     // glass and become two that cross-fade, which is what dropping the shared
                     // identity does. Keeping the identity and merely slowing the curve would

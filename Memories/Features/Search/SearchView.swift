@@ -63,6 +63,10 @@ struct SearchView: View {
             }
             .padding(.top, Space.s)
             .padding(.bottom, bottomBarInset)
+            // Rows of suggestions, which are read rather than looked at, so they stop at a
+            // measure instead of running the width of an iPad. The grid of results below them
+            // is not capped — photographs should take everything they are given.
+            .readableMeasure()
         }
         .scrollIndicators(.hidden)
         .selectionActionBar(selection)

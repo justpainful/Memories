@@ -56,6 +56,10 @@ struct PhotoGrid<Content: View>: View {
     /// The width this grid was actually given, which is not the width of the device.
     @State private var width: CGFloat = Adaptive.referenceWidth
 
+    /// Changing density re-lays every tile on screen at once. That is a lot of movement to
+    /// answer one pinch with, and it is the kind the setting exists to stop.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     init(@ViewBuilder content: @escaping () -> Content) {
         self.content = content
     }
@@ -117,7 +121,7 @@ struct PhotoGrid<Content: View>: View {
         let target = index + direction
         guard PhotoGridDensity.ladder.indices.contains(target) else { return }
 
-        withAnimation(.smooth(duration: 0.3)) {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
             storedColumns = PhotoGridDensity.ladder[target]
         }
         Haptics.selection()

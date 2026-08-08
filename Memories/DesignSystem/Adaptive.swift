@@ -43,16 +43,32 @@ enum Adaptive {
     /// away from it. Content that is read stops at a comfortable measure and centres; content
     /// that is *looked at* — the grids, the map, the feed's photography — is not capped and
     /// takes the whole window.
-    static let readableWidth: CGFloat = 700
+    ///
+    /// Six hundred and twenty rather than seven hundred, which is where this started. A
+    /// portrait iPad is 744 points wide, so a 700-point cap was 94% of it — the code said the
+    /// list was capped and the screenshot showed a row running the full width of the screen
+    /// with its chevron a hand's breadth from its label. A cap you cannot see is not a cap.
+    static let readableWidth: CGFloat = 620
 
     /// The height a full-bleed hero should take, given the size of its container.
     ///
-    /// Proportional to the *smaller* side, so a hero cannot swallow a landscape window: on a
-    /// portrait phone this is the tall editorial cover it has always been, and turned sideways
-    /// it becomes a wide one instead of a picture taller than the screen.
+    /// Two limits, and the smaller of them wins.
+    ///
+    /// The first is a proportion of the *width*: the hero is a picture, and a picture's height
+    /// should follow the width it is shown at, which is what keeps it the same shape on every
+    /// screen. The second is a fraction of the height, so that a hero can never fill the window
+    /// on its own — a feed whose first item is the whole screen is not a feed, it is a splash
+    /// screen you have to scroll past, and there is nothing to say the next thing is even there.
+    ///
+    /// On a portrait phone the width limit binds, and the hero is the tall editorial cover it
+    /// has always been. On an iPad the height limit binds instead: 1.15 × 744 points of width
+    /// would have been three quarters of the screen. Turned sideways, the height limit binds
+    /// hard, which is correct — in landscape the scarce dimension is the one the hero was
+    /// eating.
     static func heroHeight(in size: CGSize) -> CGFloat {
-        let base = min(size.width, size.height)
-        return min(max(base * 1.15, 320), size.height * 0.86)
+        let byWidth = size.width * 1.15
+        let byHeight = size.height * 0.62
+        return max(280, min(byWidth, byHeight))
     }
 
     /// How many cards fit across a horizontally scrolling row.

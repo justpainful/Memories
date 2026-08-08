@@ -26,7 +26,7 @@ enum SourcePlatform: String, Codable, CaseIterable, Sendable {
 
     var title: String {
         switch self {
-        case .camera:          return "This iPhone"
+        case .camera:          return "This \(DeviceName.current)"
         case .whatsapp:        return "WhatsApp"
         case .telegram:        return "Telegram"
         case .snapchat:        return "Snapchat"

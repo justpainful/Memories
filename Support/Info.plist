@@ -29,7 +29,9 @@
 	     flag behind the heart, so that loving a photo here means the same as loving it in
 	     Photos; read-write access exists for that and nothing else. -->
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Memories reads your library on this iPhone to find and organize your memories. Photos are analyzed on device and are never uploaded.</string>
+	<!-- "on this device", not "on this iPhone": a plist string cannot ask what it is running
+	     on, and the app now runs on iPad. -->
+	<string>Memories reads your library on this device to find and organize your memories. Photos are analyzed on device and are never uploaded.</string>
 
 	<!--
 	  Local-only background indexing. No push, no remote notifications, no APNs.

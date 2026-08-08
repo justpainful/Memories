@@ -226,6 +226,11 @@ struct AssetGridView: View {
         // what the picture is and when it was taken — which is how anyone
         // tells one photograph from another.
         .accessibilityLabel(label(for: record))
+        // Named so the UI tour can reach a photograph by asking for one. It used to tap
+        // `scrollViews.buttons.element(boundBy: 2)` — the third button on the screen, whatever
+        // that happened to be — which is how the tour once spent nine steps photographing
+        // Settings and reported nothing wrong.
+        .accessibilityIdentifier("asset.tile")
         // The overlay's own trait cannot reach out here: traits set inside a
         // button's label do not merge into the button. Stated again on the
         // element VoiceOver actually focuses.

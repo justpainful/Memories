@@ -37,7 +37,8 @@ struct OnboardingView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: Space.xl) {
-                    promise("iphone", "Your library stays on this iPhone.")
+                    promise(DeviceName.current == "iPad" ? "ipad" : "iphone",
+                            "Your library stays on \(DeviceName.thisDevice).")
                     promise("wand.and.sparkles", "Memories analyses photos locally.")
                     promise("lock.slash", "Nothing is uploaded.")
                 }
