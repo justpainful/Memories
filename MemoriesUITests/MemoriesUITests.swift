@@ -289,13 +289,18 @@ final class MemoriesUITests: XCTestCase {
         }
 
         guard !reachable() else { return }
-        for _ in 0..<8 {
+
+        // Always from the top, and always in one direction.
+        //
+        // This used to search downwards and then, if that failed, back up again — and a run of
+        // swipes in both directions leaves the list wherever it happens to stop, which at the
+        // largest text size is a screen and a half from where the next step expects to be. One
+        // capture in a hundred came back showing the feed instead of the Calendar because of
+        // it. Rewinding first costs a second and makes the search deterministic.
+        for _ in 0..<12 where !reachable() { app.swipeDown() }
+        for _ in 0..<12 {
+            if reachable() { return }
             app.swipeUp()
-            if reachable() { return }
-        }
-        for _ in 0..<10 {
-            app.swipeDown()
-            if reachable() { return }
         }
     }
 
